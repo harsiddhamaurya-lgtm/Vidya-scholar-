@@ -1,0 +1,112 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Authenticated scholar profile storing private learning progress, onboarding completion, Vidya ID, and avatar customization.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID matching document ID" },
+        "name": { "type": "string", "description": "Scholar display name" },
+        "email": { "type": "string", "description": "Account email address" },
+        "photoUrl": { "type": "string", "description": "Google profile photo URL if available" },
+        "vidyaId": { "type": "string", "description": "Unified handle#code identifier e.g. aarav#4821" },
+        "vidyaHandle": { "type": "string", "description": "Normalized lowercase handle segment" },
+        "vidyaDiscriminator": { "type": "string", "description": "4-digit discriminator suffix" },
+        "vidyaKey": { "type": "string", "description": "Canonical document key handle_code for /vidyaIds lookup" },
+        "contactCode": { "type": "string", "description": "Legacy mirror of vidyaId" },
+        "avatarMode": { "type": "string", "enum": ["PRESET", "BUILDER", "PHOTO"] },
+        "avatarPresetId": { "type": "string", "description": "Selected Indo-Futuristic preset archetype ID" },
+        "avatarCrestId": { "type": "string", "description": "Layered crest vector ID" },
+        "avatarFrameId": { "type": "string", "description": "Geometric frame ring ID" },
+        "avatarToneId": { "type": "string", "description": "Accent color tone ID" },
+        "localAvatarPhotoPath": { "type": "string", "description": "App-local file path for Photo Picker image" },
+        "focusRealm": { "type": "string", "description": "Primary subject realm focus" },
+        "onboardingCompleted": { "type": "boolean", "description": "True after post-sign-in onboarding completes" },
+        "streak": { "type": "integer" },
+        "xp": { "type": "integer" },
+        "level": { "type": "string" },
+        "hearts": { "type": "integer" },
+        "completedLessons": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp" }
+      },
+      "required": ["uid", "name", "onboardingCompleted", "createdAt", "updatedAt"]
+    },
+    "VidyaIdentityCard": {
+      "title": "VidyaIdentityCard",
+      "description": "Public non-PII scholar identity card keyed by handle_code for atomic Vidya ID reservation and peer lookup across Varta and Khel.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Owner Firebase Auth UID" },
+        "vidyaId": { "type": "string", "description": "Formatted handle#code" },
+        "vidyaHandle": { "type": "string" },
+        "vidyaDiscriminator": { "type": "string" },
+        "displayName": { "type": "string" },
+        "level": { "type": "string" },
+        "avatarMode": { "type": "string", "enum": ["PRESET", "BUILDER", "PHOTO"] },
+        "avatarPresetId": { "type": "string" },
+        "avatarCrestId": { "type": "string" },
+        "avatarFrameId": { "type": "string" },
+        "avatarToneId": { "type": "string" },
+        "focusRealm": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp" }
+      },
+      "required": ["uid", "vidyaId", "vidyaHandle", "vidyaDiscriminator", "displayName", "createdAt", "updatedAt"]
+    },
+    "Chat": {
+      "title": "Chat",
+      "description": "Peer chat or study sabha thread scoped to participants.",
+      "type": "object",
+      "properties": {
+        "createdBy": { "type": "string" },
+        "participants": { "type": "array" },
+        "name": { "type": "string" },
+        "peerVidyaId": { "type": "string" },
+        "lastMessage": { "type": "string" },
+        "lastTimestamp": { "type": "integer" },
+        "type": { "type": "string", "enum": ["individual", "group"] },
+        "subjectTag": { "type": "string" },
+        "unreadCount": { "type": "integer" },
+        "isOnline": { "type": "boolean" },
+        "timestampLabel": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["createdBy", "participants", "type", "lastTimestamp", "createdAt", "updatedAt"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "Individual chat message with denormalized memberUids for rule-local evaluation.",
+      "type": "object",
+      "properties": {
+        "senderId": { "type": "string" },
+        "senderName": { "type": "string" },
+        "senderVidyaId": { "type": "string" },
+        "memberUids": { "type": "array" },
+        "text": { "type": "string" },
+        "timestamp": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["senderId", "memberUids", "text", "timestamp", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Owner-only scholar profile and learning progress."
+    },
+    "/vidyaIds/{vidyaKey}": {
+      "schema": { "$ref": "#/entities/VidyaIdentityCard" },
+      "description": "Unique handle_code reservation and shareable non-PII scholar identity card."
+    },
+    "/chats/{chatId}": {
+      "schema": { "$ref": "#/entities/Chat" },
+      "description": "Varta peer conversations and study sabha discussion rooms."
+    },
+    "/chats/{chatId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/Message" },
+      "description": "Messages inside a Varta chat or study room."
+    }
+  }
+}

@@ -1,0 +1,793 @@
+package com.example.ui.screens
+
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Image
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.minimumInteractiveComponentSize
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.data.ChatMessage
+import com.example.data.QuestNodeState
+import com.example.data.VidyaRepository
+import com.example.ui.theme.IndoAtmosphericBackdrop
+import com.example.ui.theme.IndoToneSurface
+import com.example.ui.theme.LocalIndoPalette
+import com.example.utils.SoundHelper
+import com.example.viewmodel.AiTutorViewModel
+import com.example.viewmodel.AiUiState
+import com.example.viewmodel.VidyaVaultViewModel
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.sin
+
+private data class CosmosQuickPrompt(
+    val chipLabel: String,
+    val promptBuilder: (activeLevelSummary: String) -> String
+)
+
+private val COSMOS_QUICK_PROMPTS = listOf(
+    CosmosQuickPrompt("⚡ Quiz me on my current level") { active ->
+        "Quiz me with 3 interactive challenge questions on my current active level: $active. Wait for my answers or guide me step-by-step!"
+    },
+    CosmosQuickPrompt("🛡️ Prep me for the 50-mark Boss Battle") { active ->
+        "Give me a crisp high-yield Boss Battle strategy checklist and 2 tough synthesis questions for: $active."
+    },
+    CosmosQuickPrompt("🧠 Explain this concept visually") { active ->
+        "Explain the core intuition behind $active using a visual analogy and step-by-step breakdown."
+    },
+    CosmosQuickPrompt("💻 Debug my code step-by-step") { _ ->
+        "Help me debug my code step-by-step! Ask me to paste the snippet or give me a 4-step debugging checklist with a clean Kotlin/Python example."
+    }
+)
+
+@Composable
+fun AiTutorScreen(
+    aiViewModel: AiTutorViewModel,
+    vidyaViewModel: VidyaVaultViewModel = viewModel()
+) {
+    val messages by aiViewModel.messages.collectAsState()
+    val uiState by aiViewModel.uiState.collectAsState()
+    val completedIds by vidyaViewModel.completedLevelIds.collectAsState()
+    val palette = LocalIndoPalette.current
+    val context = LocalContext.current
+    val listState = rememberLazyListState()
+
+    var inputText by remember { mutableStateOf("") }
+    var attachedBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var attachedLabel by remember { mutableStateOf<String?>(null) }
+
+    // Determine the student's current active level for contextual quick prompts
+    val activeLevelSummary = remember(completedIds) {
+        val realm = VidyaRepository.realms.firstOrNull { r ->
+            r.levels.any { vidyaViewModel.getNodeState(r, it, completedIds) == QuestNodeState.ACTIVE }
+        } ?: VidyaRepository.realms.first()
+        val level = realm.levels.firstOrNull {
+            vidyaViewModel.getNodeState(realm, it, completedIds) == QuestNodeState.ACTIVE
+        } ?: realm.levels.first()
+        "${realm.realmId.subjectName} — Level ${level.levelNumber}: ${level.title}"
+    }
+
+    val photoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.openInputStream(uri)?.use { stream ->
+                    BitmapFactory.decodeStream(stream)
+                }
+            }.getOrNull()?.let { bmp ->
+                attachedBitmap = bmp
+                attachedLabel = "Study image attached"
+                SoundHelper.playClick(context)
+            }
+        }
+    }
+
+    LaunchedEffect(messages.size) {
+        if (messages.isNotEmpty()) {
+            listState.animateScrollToItem(messages.lastIndex)
+        }
+    }
+
+    IndoAtmosphericBackdrop(ambientGlowColor = palette.accentCyan) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            // Ultra-subtle 4% opacity Constellation / Mandala Star-Chart Watermark
+            if (!palette.isEInk) {
+                CosmosConstellationWatermark(
+                    goldTint = palette.accentGold,
+                    cyanTint = palette.accentCyan,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalArrangement = Arrangement.SpaceBetween
+            ) {
+                // 1. THE "COSMOS" REALM HEADER & CELESTIAL ASTROLABE AVATAR STAGE
+                CosmosHeaderCard(
+                    isThinking = uiState is AiUiState.Loading
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // 2. CONVERSATIONAL FEED
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    contentPadding = PaddingValues(vertical = 4.dp)
+                ) {
+                    items(messages, key = { it.id }) { msg ->
+                        when {
+                            msg.id == "cosmos_welcome" -> CosmosWelcomeSanctuaryCard(msg.text)
+                            msg.isUser -> CosmosUserBubble(msg.text)
+                            else -> CosmosAiReplyCard(msg.text)
+                        }
+                    }
+
+                    if (uiState is AiUiState.Loading) {
+                        item {
+                            CosmosThinkingIndicator()
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // 3. QUICK-ACTION PROMPT PILLS TRAY
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    contentPadding = PaddingValues(vertical = 4.dp)
+                ) {
+                    items(COSMOS_QUICK_PROMPTS) { item ->
+                        IndoToneSurface(
+                            onClick = {
+                                SoundHelper.playWoodyTock(context)
+                                aiViewModel.sendMessage(item.promptBuilder(activeLevelSummary))
+                            },
+                            shape = RoundedCornerShape(16.dp),
+                            containerColor = palette.elevatedSurface,
+                            hairlineColor = palette.goldHairline
+                        ) {
+                            Text(
+                                text = item.chipLabel,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+                }
+
+                // Optional Attachment Preview Pill
+                AnimatedVisibility(visible = attachedBitmap != null) {
+                    IndoToneSurface(
+                        modifier = Modifier.padding(top = 4.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        containerColor = palette.secondaryCopper,
+                        hairlineColor = palette.goldHairline
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(Icons.Default.Image, contentDescription = null, tint = palette.accentCyan, modifier = Modifier.size(16.dp))
+                            Text(
+                                text = attachedLabel ?: "Image attached",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            IconButton(
+                                onClick = {
+                                    attachedBitmap = null
+                                    attachedLabel = null
+                                },
+                                modifier = Modifier.size(22.dp)
+                            ) {
+                                Icon(Icons.Default.Close, contentDescription = "Remove attachment", modifier = Modifier.size(14.dp))
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                // 4. TACTILE COSMOS INPUT BAR WITH PHOTO PICKER + 0.92F SPRING SEND BUTTON
+                CosmosInputBar(
+                    value = inputText,
+                    onValueChange = { inputText = it },
+                    hasAttachment = attachedBitmap != null,
+                    onAttachClick = {
+                        photoPickerLauncher.launch(
+                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                        )
+                    },
+                    onSendClick = {
+                        if (inputText.isNotBlank() || attachedBitmap != null) {
+                            SoundHelper.playTempleChime(context)
+                            aiViewModel.sendMessage(inputText, attachedBitmap)
+                            inputText = ""
+                            attachedBitmap = null
+                            attachedLabel = null
+                        }
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CosmosConstellationWatermark(
+    goldTint: Color,
+    cyanTint: Color,
+    modifier: Modifier = Modifier
+) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val starGold = goldTint.copy(alpha = 0.045f)
+        val arcCyan = cyanTint.copy(alpha = 0.04f)
+        val stroke = Stroke(width = 1.dp.toPx())
+
+        // Constellation star points across canvas
+        val stars = listOf(
+            Offset(w * 0.14f, h * 0.22f),
+            Offset(w * 0.34f, h * 0.17f),
+            Offset(w * 0.56f, h * 0.26f),
+            Offset(w * 0.82f, h * 0.20f),
+            Offset(w * 0.72f, h * 0.44f),
+            Offset(w * 0.28f, h * 0.52f),
+            Offset(w * 0.18f, h * 0.72f),
+            Offset(w * 0.62f, h * 0.68f),
+            Offset(w * 0.86f, h * 0.76f)
+        )
+        for (i in 0 until stars.lastIndex) {
+            drawLine(starGold, stars[i], stars[i + 1], strokeWidth = 0.9.dp.toPx())
+        }
+        stars.forEachIndexed { idx, pt ->
+            drawCircle(if (idx % 2 == 0) starGold else arcCyan, radius = 2.6.dp.toPx(), center = pt)
+        }
+
+        // Large central celestial mandala astrolabe rings (4% opacity)
+        val center = Offset(w * 0.5f, h * 0.48f)
+        drawCircle(arcCyan, radius = w * 0.38f, center = center, style = stroke)
+        drawCircle(starGold, radius = w * 0.27f, center = center, style = stroke)
+    }
+}
+
+@Composable
+fun CelestialAstrolabeAvatar(
+    size: Dp,
+    isPulsingFast: Boolean = false
+) {
+    val palette = LocalIndoPalette.current
+    val infiniteTransition = rememberInfiniteTransition(label = "celestial_astrolabe")
+
+    // Gentle breathing pulse animation so the space feels alive and attentive
+    val breathScale by infiniteTransition.animateFloat(
+        initialValue = 0.95f,
+        targetValue = 1.05f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(
+                durationMillis = if (isPulsingFast) 900 else 2400,
+                easing = CubicBezierEasing(0.16f, 1f, 0.3f, 1f)
+            ),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "astrolabe_breath"
+    )
+    val orbitAngle by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 22000, easing = LinearEasing)
+        ),
+        label = "astrolabe_orbit"
+    )
+
+    Box(
+        modifier = Modifier
+            .size(size)
+            .graphicsLayer {
+                if (!palette.isEInk) {
+                    scaleX = breathScale
+                    scaleY = breathScale
+                }
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val c = Offset(this.size.width / 2f, this.size.height / 2f)
+            val outerR = this.size.minDimension / 2f - 2.dp.toPx()
+            val innerR = outerR * 0.76f
+            val gold = if (palette.isEInk) palette.accentSaffron else Color(0xFFD4AF37)
+            val cyan = if (palette.isEInk) palette.accentCyan else Color(0xFF00D2E6)
+
+            // Soft celestial radial aura
+            if (!palette.isEInk) {
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        listOf(cyan.copy(alpha = 0.22f), gold.copy(alpha = 0.1f), Color.Transparent),
+                        center = c,
+                        radius = outerR
+                    ),
+                    radius = outerR,
+                    center = c
+                )
+            }
+
+            // Outer Golden-Cyan Astrolabe Ring
+            drawCircle(
+                brush = Brush.sweepGradient(listOf(gold, cyan, Color(0xFFE88D14), gold), c),
+                radius = outerR,
+                center = c,
+                style = Stroke(width = 2.dp.toPx())
+            )
+
+            // Sacred geometric inner ring + astrolabe notches
+            drawCircle(
+                color = gold.copy(alpha = 0.7f),
+                radius = innerR,
+                center = c,
+                style = Stroke(width = 1.dp.toPx())
+            )
+
+            if (!palette.isEInk) {
+                rotate(orbitAngle, pivot = c) {
+                    for (i in 0 until 8) {
+                        val a = i * PI / 4.0
+                        val p1 = Offset(c.x + (innerR * cos(a)).toFloat(), c.y + (innerR * sin(a)).toFloat())
+                        val p2 = Offset(c.x + (outerR * cos(a)).toFloat(), c.y + (outerR * sin(a)).toFloat())
+                        drawLine(gold.copy(alpha = 0.7f), p1, p2, strokeWidth = 1.1.dp.toPx(), cap = StrokeCap.Round)
+                    }
+                    // Orbiting celestial node
+                    drawCircle(
+                        color = cyan,
+                        radius = 2.8.dp.toPx(),
+                        center = Offset(c.x + outerR, c.y)
+                    )
+                }
+            }
+        }
+
+        // Inner Companion Avatar Core (reserved for future AI character portrait)
+        Box(
+            modifier = Modifier
+                .size(size * 0.64f)
+                .clip(CircleShape)
+                .background(
+                    if (palette.isEInk) palette.elevatedSurface
+                    else Color(0xFF141C2B)
+                )
+                .border(0.9.dp, Color(0x80D4AF37), CircleShape),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Default.AutoAwesome,
+                contentDescription = "Cosmos Companion Avatar Frame",
+                tint = if (palette.isEInk) palette.accentSaffron else Color(0xFFFFD166),
+                modifier = Modifier.size(size * 0.34f)
+            )
+        }
+    }
+}
+
+@Composable
+private fun CosmosHeaderCard(isThinking: Boolean) {
+    val palette = LocalIndoPalette.current
+    IndoToneSurface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("cosmos_header"),
+        shape = RoundedCornerShape(22.dp),
+        containerColor = if (palette.isDark) palette.elevatedSurface else palette.cardSurface,
+        hairlineColor = palette.goldHairline
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            CelestialAstrolabeAvatar(size = 52.dp, isPulsingFast = isThinking)
+
+            Column(modifier = Modifier.weight(1f)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "Cosmos",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (palette.isEInk) palette.elevatedSurface else palette.accentCyan.copy(alpha = 0.16f)
+                    ) {
+                        Text(
+                            text = if (isThinking) "THINKING" else "SANCTUARY",
+                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = palette.accentCyan
+                        )
+                    }
+                }
+                Text(
+                    text = "Your Personal AI Study Sanctuary & Doubt Solver",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CosmosWelcomeSanctuaryCard(greeting: String) {
+    val palette = LocalIndoPalette.current
+    IndoToneSurface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(22.dp),
+        containerColor = palette.cardSurface,
+        hairlineColor = palette.goldHairline
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            CelestialAstrolabeAvatar(size = 66.dp)
+            Text(
+                text = "COSMOS COMPANION",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.ExtraBold,
+                letterSpacing = 1.sp,
+                color = Color(0xFFE88D14)
+            )
+            Text(
+                text = greeting,
+                style = MaterialTheme.typography.bodyMedium,
+                lineHeight = 22.sp,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+        }
+    }
+}
+
+@Composable
+private fun CosmosUserBubble(text: String) {
+    val palette = LocalIndoPalette.current
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.End
+    ) {
+        IndoToneSurface(
+            modifier = Modifier.widthIn(max = 295.dp),
+            shape = RoundedCornerShape(topStart = 18.dp, topEnd = 6.dp, bottomStart = 18.dp, bottomEnd = 18.dp),
+            containerColor = if (palette.isDark) palette.elevatedSurface else palette.secondaryIndigo,
+            hairlineColor = palette.goldHairline
+        ) {
+            Text(
+                text = text,
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+        }
+    }
+}
+
+@Composable
+private fun CosmosAiReplyCard(text: String) {
+    val palette = LocalIndoPalette.current
+    val segments = remember(text) { parseCosmosSegments(text) }
+
+    IndoToneSurface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(topStart = 6.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 18.dp),
+        containerColor = palette.cardSurface,
+        hairlineColor = palette.goldHairline
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(IntrinsicSize.Min)
+        ) {
+            // Vibrant Saffron Amber (#E88D14) Left Accent Bar
+            Box(
+                modifier = Modifier
+                    .width(4.dp)
+                    .fillMaxHeight()
+                    .background(if (palette.isEInk) palette.accentSaffron else Color(0xFFE88D14))
+            )
+
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                segments.forEach { seg ->
+                    when (seg) {
+                        is CosmosSegment.CodeOrFormula -> {
+                            IndoToneSurface(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp),
+                                containerColor = if (palette.isEInk) palette.elevatedSurface else palette.highlightSurface,
+                                hairlineColor = palette.goldHairline
+                            ) {
+                                Text(
+                                    text = seg.content,
+                                    modifier = Modifier
+                                        .horizontalScroll(rememberScrollState())
+                                        .padding(12.dp),
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 12.sp,
+                                    lineHeight = 18.sp,
+                                    color = when {
+                                        palette.isEInk -> MaterialTheme.colorScheme.onSurface
+                                        palette.isDark -> Color(0xFF7CE8FF)
+                                        else -> palette.accentCyan
+                                    }
+                                )
+                            }
+                        }
+                        is CosmosSegment.Prose -> {
+                            Text(
+                                text = seg.content,
+                                style = MaterialTheme.typography.bodyMedium,
+                                lineHeight = 22.sp,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private sealed class CosmosSegment {
+    data class Prose(val content: String) : CosmosSegment()
+    data class CodeOrFormula(val content: String) : CosmosSegment()
+}
+
+private fun parseCosmosSegments(raw: String): List<CosmosSegment> {
+    val result = mutableListOf<CosmosSegment>()
+    val regex = Regex("```(?:[a-zA-Z0-9_+-]*\\n)?([\\s\\S]*?)```")
+    var cursor = 0
+    for (match in regex.findAll(raw)) {
+        if (match.range.first > cursor) {
+            val prose = raw.substring(cursor, match.range.first).trim()
+            if (prose.isNotEmpty()) result += CosmosSegment.Prose(prose)
+        }
+        val code = match.groupValues[1].trim()
+        if (code.isNotEmpty()) result += CosmosSegment.CodeOrFormula(code)
+        cursor = match.range.last + 1
+    }
+    if (cursor < raw.length) {
+        val tail = raw.substring(cursor).trim()
+        if (tail.isNotEmpty()) result += CosmosSegment.Prose(tail)
+    }
+    if (result.isEmpty()) result += CosmosSegment.Prose(raw)
+    return result
+}
+
+@Composable
+private fun CosmosThinkingIndicator() {
+    val palette = LocalIndoPalette.current
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
+        IndoToneSurface(
+            shape = RoundedCornerShape(16.dp),
+            containerColor = palette.cardSurface,
+            hairlineColor = palette.goldHairline
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(16.dp),
+                    strokeWidth = 2.dp,
+                    color = Color(0xFFE88D14)
+                )
+                Text(
+                    text = "Cosmos Companion is weaving an explanation...",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CosmosInputBar(
+    value: String,
+    onValueChange: (String) -> Unit,
+    hasAttachment: Boolean,
+    onAttachClick: () -> Unit,
+    onSendClick: () -> Unit
+) {
+    val palette = LocalIndoPalette.current
+    val sendInteraction = remember { MutableInteractionSource() }
+    val sendPressed by sendInteraction.collectIsPressedAsState()
+    val sendScale by animateFloatAsState(
+        targetValue = if (sendPressed) 0.92f else 1f,
+        animationSpec = spring(stiffness = Spring.StiffnessMedium, dampingRatio = 0.65f),
+        label = "cosmos_send_scale"
+    )
+
+    IndoToneSurface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(22.dp),
+        containerColor = palette.elevatedSurface,
+        hairlineColor = palette.goldHairline
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 6.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            IconButton(
+                onClick = onAttachClick,
+                modifier = Modifier
+                    .size(44.dp)
+                    .minimumInteractiveComponentSize()
+                    .testTag("cosmos_attach_button")
+            ) {
+                Icon(
+                    imageVector = Icons.Default.AttachFile,
+                    contentDescription = "Attach Study Image",
+                    tint = if (hasAttachment) Color(0xFFE88D14) else palette.accentCyan
+                )
+            }
+
+            OutlinedTextField(
+                value = value,
+                onValueChange = onValueChange,
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("cosmos_input_field"),
+                placeholder = {
+                    Text(
+                        text = "Ask anything in the Cosmos...",
+                        fontSize = 13.sp
+                    )
+                },
+                maxLines = 3,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = Color.Transparent,
+                    unfocusedBorderColor = Color.Transparent,
+                    focusedContainerColor = Color.Transparent,
+                    unfocusedContainerColor = Color.Transparent
+                )
+            )
+
+            Box(
+                modifier = Modifier
+                    .size(46.dp)
+                    .minimumInteractiveComponentSize()
+                    .graphicsLayer {
+                        scaleX = sendScale
+                        scaleY = sendScale
+                    }
+                    .clip(CircleShape)
+                    .background(if (palette.isEInk) palette.accentSaffron else Color(0xFFE88D14))
+                    .border(1.dp, Color(0xFFFFD166), CircleShape)
+                    .clickable(
+                        interactionSource = sendInteraction,
+                        indication = null,
+                        onClick = onSendClick
+                    )
+                    .testTag("cosmos_send_button"),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.Send,
+                    contentDescription = "Send to Cosmos",
+                    tint = if (palette.isEInk) MaterialTheme.colorScheme.onPrimary else Color.White,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        }
+    }
+}

@@ -1,0 +1,234 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidVidyaKey(key) {
+      return key is string && key.size() >= 8 && key.size() <= 21 && key.matches('^[a-z0-9_]{3,16}_[0-9]{4}$');
+    }
+
+    function isValidAvatarMode(mode) {
+      return mode in ['PRESET', 'BUILDER', 'PHOTO'];
+    }
+
+    function isValidUserProfile(data) {
+      return data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 &&
+             data.name is string && data.name.size() >= 1 && data.name.size() <= 60 &&
+             data.onboardingCompleted is bool &&
+             (!('email' in data) || (data.email is string && data.email.size() <= 120)) &&
+             (!('photoUrl' in data) || (data.photoUrl is string && data.photoUrl.size() <= 500)) &&
+             (!('vidyaId' in data) || (data.vidyaId is string && data.vidyaId.size() <= 24)) &&
+             (!('vidyaHandle' in data) || (data.vidyaHandle is string && data.vidyaHandle.size() <= 16)) &&
+             (!('vidyaDiscriminator' in data) || (data.vidyaDiscriminator is string && data.vidyaDiscriminator.size() <= 4)) &&
+             (!('vidyaKey' in data) || (data.vidyaKey is string && data.vidyaKey.size() <= 24)) &&
+             (!('contactCode' in data) || (data.contactCode is string && data.contactCode.size() <= 24)) &&
+             (!('avatarMode' in data) || isValidAvatarMode(data.avatarMode)) &&
+             (!('avatarPresetId' in data) || (data.avatarPresetId is string && data.avatarPresetId.size() <= 40)) &&
+             (!('avatarCrestId' in data) || (data.avatarCrestId is string && data.avatarCrestId.size() <= 40)) &&
+             (!('avatarFrameId' in data) || (data.avatarFrameId is string && data.avatarFrameId.size() <= 40)) &&
+             (!('avatarToneId' in data) || (data.avatarToneId is string && data.avatarToneId.size() <= 40)) &&
+             (!('localAvatarPhotoPath' in data) || (data.localAvatarPhotoPath is string && data.localAvatarPhotoPath.size() <= 400)) &&
+             (!('focusRealm' in data) || (data.focusRealm is string && data.focusRealm.size() <= 32)) &&
+             (!('streak' in data) || (data.streak is int && data.streak >= 0 && data.streak <= 100000)) &&
+             (!('xp' in data) || (data.xp is int && data.xp >= 0 && data.xp <= 10000000)) &&
+             (!('level' in data) || (data.level is string && data.level.size() <= 40)) &&
+             (!('hearts' in data) || (data.hearts is int && data.hearts >= 0 && data.hearts <= 20)) &&
+             (!('completedLessons' in data) || (
+               data.completedLessons is list &&
+               data.completedLessons.size() <= 200 &&
+               (data.completedLessons.size() == 0 || data.completedLessons[0] is string)
+             ));
+    }
+
+    function isValidVidyaIdentityCard(data, vidyaKey) {
+      return data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 &&
+             data.vidyaHandle is string && data.vidyaHandle.matches('^[a-z0-9_]{3,16}$') &&
+             data.vidyaDiscriminator is string && data.vidyaDiscriminator.matches('^[0-9]{4}$') &&
+             data.vidyaId is string && data.vidyaId == (data.vidyaHandle + '#' + data.vidyaDiscriminator) &&
+             vidyaKey == (data.vidyaHandle + '_' + data.vidyaDiscriminator) &&
+             data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 60 &&
+             (!('level' in data) || (data.level is string && data.level.size() <= 40)) &&
+             (!('avatarMode' in data) || isValidAvatarMode(data.avatarMode)) &&
+             (!('avatarPresetId' in data) || (data.avatarPresetId is string && data.avatarPresetId.size() <= 40)) &&
+             (!('avatarCrestId' in data) || (data.avatarCrestId is string && data.avatarCrestId.size() <= 40)) &&
+             (!('avatarFrameId' in data) || (data.avatarFrameId is string && data.avatarFrameId.size() <= 40)) &&
+             (!('avatarToneId' in data) || (data.avatarToneId is string && data.avatarToneId.size() <= 40)) &&
+             (!('focusRealm' in data) || (data.focusRealm is string && data.focusRealm.size() <= 32));
+    }
+
+    function isValidChat(data) {
+      return data.createdBy is string && data.createdBy.size() >= 1 && data.createdBy.size() <= 128 &&
+             data.participants is list &&
+             data.participants.size() >= 1 &&
+             data.participants.size() <= 50 &&
+             data.participants[0] is string &&
+             data.type in ['individual', 'group'] &&
+             data.lastTimestamp is int &&
+             (!('name' in data) || (data.name is string && data.name.size() <= 100)) &&
+             (!('peerVidyaId' in data) || (data.peerVidyaId is string && data.peerVidyaId.size() <= 30)) &&
+             (!('lastMessage' in data) || (data.lastMessage is string && data.lastMessage.size() <= 1000)) &&
+             (!('subjectTag' in data) || (data.subjectTag is string && data.subjectTag.size() <= 40)) &&
+             (!('unreadCount' in data) || (data.unreadCount is int && data.unreadCount >= 0 && data.unreadCount <= 10000)) &&
+             (!('isOnline' in data) || data.isOnline is bool) &&
+             (!('timestampLabel' in data) || (data.timestampLabel is string && data.timestampLabel.size() <= 40));
+    }
+
+    function isValidMessage(data) {
+      return data.senderId is string && data.senderId.size() >= 1 && data.senderId.size() <= 128 &&
+             data.memberUids is list &&
+             data.memberUids.size() >= 1 &&
+             data.memberUids.size() <= 50 &&
+             data.memberUids[0] is string &&
+             data.text is string && data.text.size() >= 1 && data.text.size() <= 2000 &&
+             data.timestamp is int &&
+             (!('senderName' in data) || (data.senderName is string && data.senderName.size() <= 60)) &&
+             (!('senderVidyaId' in data) || (data.senderVidyaId is string && data.senderVidyaId.size() <= 24));
+    }
+
+    match /users/{userId} {
+      allow get, list: if isSignedIn() && request.auth.uid == userId;
+
+      allow create: if isSignedIn() &&
+                       isValidId(userId) &&
+                       request.auth.uid == userId &&
+                       incoming().uid == request.auth.uid &&
+                       incoming().keys().hasAll(['uid', 'name', 'onboardingCompleted', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly([
+                         'uid', 'name', 'email', 'photoUrl',
+                         'vidyaId', 'vidyaHandle', 'vidyaDiscriminator', 'vidyaKey', 'contactCode',
+                         'avatarMode', 'avatarPresetId', 'avatarCrestId', 'avatarFrameId', 'avatarToneId', 'localAvatarPhotoPath',
+                         'focusRealm', 'onboardingCompleted',
+                         'streak', 'xp', 'level', 'hearts', 'completedLessons',
+                         'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().createdAt is timestamp && incoming().createdAt <= request.time &&
+                       incoming().updatedAt is timestamp && incoming().updatedAt <= request.time &&
+                       isValidUserProfile(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidId(userId) &&
+                       request.auth.uid == userId &&
+                       incoming().uid == existing().uid &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().updatedAt is timestamp && incoming().updatedAt <= request.time &&
+                       isValidUserProfile(incoming()) &&
+                       incoming().diff(existing()).affectedKeys().hasOnly([
+                         'name', 'photoUrl',
+                         'vidyaId', 'vidyaHandle', 'vidyaDiscriminator', 'vidyaKey', 'contactCode',
+                         'avatarMode', 'avatarPresetId', 'avatarCrestId', 'avatarFrameId', 'avatarToneId', 'localAvatarPhotoPath',
+                         'focusRealm', 'onboardingCompleted',
+                         'streak', 'xp', 'level', 'hearts', 'completedLessons',
+                         'updatedAt'
+                       ]);
+
+      allow delete: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+    }
+
+    match /vidyaIds/{vidyaKey} {
+      // Any signed-in scholar can look up a specific handle_code card (zero PII stored here)
+      allow get: if isSignedIn() && isValidVidyaKey(vidyaKey);
+
+      // List queries strictly scoped to the caller's own claimed card
+      allow list: if isSignedIn() && existing().uid == request.auth.uid;
+
+      allow create: if isSignedIn() &&
+                       isValidVidyaKey(vidyaKey) &&
+                       incoming().uid == request.auth.uid &&
+                       incoming().keys().hasAll(['uid', 'vidyaId', 'vidyaHandle', 'vidyaDiscriminator', 'displayName', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly([
+                         'uid', 'vidyaId', 'vidyaHandle', 'vidyaDiscriminator', 'displayName', 'level',
+                         'avatarMode', 'avatarPresetId', 'avatarCrestId', 'avatarFrameId', 'avatarToneId',
+                         'focusRealm', 'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().createdAt is timestamp && incoming().createdAt <= request.time &&
+                       incoming().updatedAt is timestamp && incoming().updatedAt <= request.time &&
+                       isValidVidyaIdentityCard(incoming(), vidyaKey);
+
+      allow update: if isSignedIn() &&
+                       isValidVidyaKey(vidyaKey) &&
+                       existing().uid == request.auth.uid &&
+                       incoming().uid == existing().uid &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().updatedAt is timestamp && incoming().updatedAt <= request.time &&
+                       isValidVidyaIdentityCard(incoming(), vidyaKey) &&
+                       incoming().diff(existing()).affectedKeys().hasOnly([
+                         'displayName', 'level', 'avatarMode', 'avatarPresetId', 'avatarCrestId',
+                         'avatarFrameId', 'avatarToneId', 'focusRealm', 'updatedAt'
+                       ]);
+
+      allow delete: if isSignedIn() && isValidVidyaKey(vidyaKey) && existing().uid == request.auth.uid;
+    }
+
+    match /chats/{chatId} {
+      allow get: if isSignedIn() && isValidId(chatId) && (request.auth.uid in existing().participants);
+      allow list: if isSignedIn() && (request.auth.uid in existing().participants);
+
+      allow create: if isSignedIn() &&
+                       isValidId(chatId) &&
+                       incoming().createdBy == request.auth.uid &&
+                       (request.auth.uid in incoming().participants) &&
+                       incoming().keys().hasAll(['createdBy', 'participants', 'type', 'lastTimestamp', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly([
+                         'createdBy', 'participants', 'name', 'peerVidyaId', 'lastMessage', 'lastTimestamp',
+                         'type', 'subjectTag', 'unreadCount', 'isOnline', 'timestampLabel', 'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().createdAt is timestamp && incoming().createdAt <= request.time &&
+                       incoming().updatedAt is timestamp && incoming().updatedAt <= request.time &&
+                       isValidChat(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidId(chatId) &&
+                       (request.auth.uid in existing().participants) &&
+                       (request.auth.uid in incoming().participants) &&
+                       incoming().createdBy == existing().createdBy &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().updatedAt is timestamp && incoming().updatedAt <= request.time &&
+                       isValidChat(incoming()) &&
+                       incoming().diff(existing()).affectedKeys().hasOnly([
+                         'participants', 'name', 'lastMessage', 'lastTimestamp', 'unreadCount', 'timestampLabel', 'updatedAt'
+                       ]);
+
+      allow delete: if isSignedIn() && isValidId(chatId) && existing().createdBy == request.auth.uid;
+
+      match /messages/{messageId} {
+        allow get: if isSignedIn() && isValidId(chatId) && isValidId(messageId) && (request.auth.uid in existing().memberUids);
+        allow list: if isSignedIn() && isValidId(chatId) && (request.auth.uid in existing().memberUids);
+
+        allow create: if isSignedIn() &&
+                         isValidId(chatId) &&
+                         isValidId(messageId) &&
+                         incoming().senderId == request.auth.uid &&
+                         (request.auth.uid in incoming().memberUids) &&
+                         incoming().keys().hasAll(['senderId', 'memberUids', 'text', 'timestamp', 'createdAt']) &&
+                         incoming().keys().hasOnly(['senderId', 'senderName', 'senderVidyaId', 'memberUids', 'text', 'timestamp', 'createdAt']) &&
+                         incoming().createdAt is timestamp && incoming().createdAt <= request.time &&
+                         isValidMessage(incoming()) &&
+                         exists(/databases/$(database)/documents/chats/$(chatId)) &&
+                         (request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants);
+
+        allow update, delete: if false;
+      }
+    }
+  }
+}

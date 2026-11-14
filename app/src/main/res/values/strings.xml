@@ -1,0 +1,10 @@
+<resources>
+    <string name="app_name">Vidhya Scholar</string>
+    <string name="auth_continue_google">Continue with Google</string>
+    <string name="auth_local_preview">Explore Offline (Local Preview)</string>
+    <string name="onboarding_step_identity">Forge Your Vidya ID</string>
+    <string name="onboarding_step_avatar">Craft Your Scholar Crest</string>
+    <string name="onboarding_step_realm">Choose Your Focus Realm</string>
+    <string name="profile_customize_avatar">Customize Avatar &amp; Frame</string>
+    <string name="vidya_id_copied">Vidya ID copied to clipboard</string>
+</resources>
