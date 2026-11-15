@@ -72,8 +72,11 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.data.AcademicStream
+import com.example.data.BatchType
 import com.example.data.QuestLevel
 import com.example.data.RealmId
+import com.example.data.StandardGrade
 import com.example.data.SubjectRealm
 import com.example.data.VidyaRepository
 import com.example.ui.components.RealmCardGeometryWatermark
@@ -102,6 +105,11 @@ fun CoursesScreen(
     vidyaViewModel: VidyaVaultViewModel = viewModel(),
     authViewModel: AuthViewModel = viewModel()
 ) {
+    val profile by authViewModel.userProfile.collectAsState()
+    val standardId = profile?.standardId ?: "class_11"
+    val streamId = profile?.streamId ?: "science_pcm"
+    val batchType = profile?.batchType ?: "live"
+
     var destination by remember { mutableStateOf<VidyaDestination>(VidyaDestination.VaultGrid) }
 
     AnimatedContent(
@@ -120,13 +128,16 @@ fun CoursesScreen(
             VidyaDestination.VaultGrid -> {
                 VidyaRealmPortalVault(
                     vidyaViewModel = vidyaViewModel,
+                    standardId = standardId,
+                    streamId = streamId,
+                    batchType = batchType,
                     onEnterRealm = { realm -> destination = VidyaDestination.QuestMap(realm.realmId) },
                     onOpenNotes = { realm -> destination = VidyaDestination.SavedNotes(realm.realmId) },
                     onOpenLog = { realm -> destination = VidyaDestination.QuestionsLog(realm.realmId) }
                 )
             }
             is VidyaDestination.QuestMap -> {
-                val realm = VidyaRepository.getRealm(dest.realmId)
+                val realm = vidyaViewModel.getRealm(dest.realmId, standardId, streamId, batchType)
                 WindingQuestMapView(
                     realm = realm,
                     vidyaViewModel = vidyaViewModel,
@@ -137,7 +148,7 @@ fun CoursesScreen(
                 )
             }
             is VidyaDestination.PlayLevel -> {
-                val realm = VidyaRepository.getRealm(dest.realmId)
+                val realm = vidyaViewModel.getRealm(dest.realmId, standardId, streamId, batchType)
                 if (dest.level.isBossBattle) {
                     BossBattleArenaScreen(
                         level = dest.level,
@@ -157,7 +168,7 @@ fun CoursesScreen(
                 }
             }
             is VidyaDestination.SavedNotes -> {
-                val realm = VidyaRepository.getRealm(dest.realmId)
+                val realm = vidyaViewModel.getRealm(dest.realmId, standardId, streamId, batchType)
                 SavedNotesArchiveView(
                     realm = realm,
                     vidyaViewModel = vidyaViewModel,
@@ -165,7 +176,7 @@ fun CoursesScreen(
                 )
             }
             is VidyaDestination.QuestionsLog -> {
-                val realm = VidyaRepository.getRealm(dest.realmId)
+                val realm = vidyaViewModel.getRealm(dest.realmId, standardId, streamId, batchType)
                 AnsweredQuestionsLogView(
                     realm = realm,
                     vidyaViewModel = vidyaViewModel,
@@ -179,25 +190,34 @@ fun CoursesScreen(
 @Composable
 private fun VidyaRealmPortalVault(
     vidyaViewModel: VidyaVaultViewModel,
+    standardId: String,
+    streamId: String,
+    batchType: String,
     onEnterRealm: (SubjectRealm) -> Unit,
     onOpenNotes: (SubjectRealm) -> Unit,
     onOpenLog: (SubjectRealm) -> Unit
 ) {
     val palette = LocalIndoPalette.current
     val completedIds by vidyaViewModel.completedLevelIds.collectAsState()
-    val realms = VidyaRepository.realms
+    val standardGrade = StandardGrade.fromId(standardId)
+    val academicStream = AcademicStream.fromId(streamId)
+    val batch = BatchType.fromId(batchType)
 
-    // 2-Column Staggered Bento layout pairing:
-    // Left Column: Mathematics (tall), Chemistry (compact), English (tall-featured)
-    // Right Column: Physics (compact), Coding & AI (tall) -> natural masonry cadence without file-folder rows
-    val leftRealms = listOf(realms[0] to 248.dp, realms[2] to 216.dp, realms[4] to 228.dp)
-    val rightRealms = listOf(realms[1] to 218.dp, realms[3] to 252.dp)
+    val realms = remember(standardId, streamId, batchType) {
+        vidyaViewModel.getRealmsForStudent(standardId, streamId, batchType)
+    }
+
+    val totalQuests = realms.sumOf { it.levels.size }
+    val completedInRealms = realms.flatMap { it.levels }.count { it.id in completedIds }
+
+    val leftRealms = realms.filterIndexed { index, _ -> index % 2 == 0 }
+    val rightRealms = realms.filterIndexed { index, _ -> index % 2 != 0 }
 
     IndoAtmosphericBackdrop(ambientGlowColor = palette.accentSaffron) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             item {
                 Row(
@@ -213,7 +233,7 @@ private fun VidyaRealmPortalVault(
                             color = MaterialTheme.colorScheme.onBackground
                         )
                         Text(
-                            text = "Choose a knowledge realm to embark on your quest",
+                            text = "Knowledge realms calibrated to your enrolled stream & batch",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -235,12 +255,59 @@ private fun VidyaRealmPortalVault(
                                 modifier = Modifier.size(16.dp)
                             )
                             Text(
-                                text = "${completedIds.size}/25 Quests",
+                                text = "$completedInRealms/$totalQuests Quests",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                         }
+                    }
+                }
+            }
+
+            // Academic Batch Pill
+            item {
+                IndoToneSurface(
+                    shape = RoundedCornerShape(12.dp),
+                    containerColor = palette.elevatedSurface.copy(alpha = 0.85f),
+                    hairlineColor = palette.goldHairline
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = palette.accentGold.copy(alpha = 0.18f),
+                                border = BorderStroke(1.dp, palette.accentGold.copy(alpha = 0.5f))
+                            ) {
+                                Text(
+                                    text = batch.badgeLabel,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = palette.accentGold,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                            Text(
+                                text = "${standardGrade.shortName} • ${if (!standardGrade.hasStreams) "Foundation" else academicStream.tagLabel}",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                        Text(
+                            text = "${realms.size} Dynamic Subjects",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
             }
@@ -256,8 +323,9 @@ private fun VidyaRealmPortalVault(
                         modifier = Modifier.weight(1f),
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        leftRealms.forEachIndexed { i, (realm, cardMinHeight) ->
+                        leftRealms.forEachIndexed { i, realm ->
                             val (lvl, frac) = vidyaViewModel.getRealmProgress(realm, completedIds)
+                            val cardMinHeight = if (i % 2 == 0) 244.dp else 220.dp
                             RealmPortalCard(
                                 realm = realm,
                                 currentLevel = lvl,
@@ -275,8 +343,9 @@ private fun VidyaRealmPortalVault(
                         modifier = Modifier.weight(1f),
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        rightRealms.forEachIndexed { i, (realm, cardMinHeight) ->
+                        rightRealms.forEachIndexed { i, realm ->
                             val (lvl, frac) = vidyaViewModel.getRealmProgress(realm, completedIds)
+                            val cardMinHeight = if (i % 2 == 0) 220.dp else 244.dp
                             RealmPortalCard(
                                 realm = realm,
                                 currentLevel = lvl,
@@ -291,10 +360,12 @@ private fun VidyaRealmPortalVault(
 
                         // Compact Boss Trials Summary Bento Tile balancing the right column bottom
                         BossTrialsSummaryTile(
-                            completedBosses = realms.count { completedIds.contains(it.levels.last().id) },
+                            completedBosses = realms.count { realm -> completedIds.contains(realm.levels.lastOrNull()?.id) },
                             totalRealms = realms.size,
-                            staggerIndex = 5,
-                            onEnterCodingBoss = { onEnterRealm(realms[3]) }
+                            staggerIndex = realms.size + 1,
+                            onEnterCodingBoss = {
+                                if (realms.isNotEmpty()) onEnterRealm(realms.last())
+                            }
                         )
                     }
                 }

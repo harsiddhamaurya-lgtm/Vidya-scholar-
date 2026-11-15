@@ -18,6 +18,7 @@ import com.example.data.UserProfile
 import com.example.data.VidyaIdentityCard
 import com.example.data.repository.ScholarIdentityRepository
 import com.example.data.repository.VidyaIdFormatter
+import com.example.security.LocalProfileStore
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
@@ -59,7 +60,8 @@ sealed interface VidyaAvailabilityState {
 }
 
 class AuthViewModel(
-    private val repository: ScholarIdentityRepository
+    private val repository: ScholarIdentityRepository,
+    private val localProfileStore: LocalProfileStore? = null
 ) : ViewModel() {
 
     private val auth = Firebase.auth
@@ -112,20 +114,24 @@ class AuthViewModel(
         val clientId = runCatching { context.getString(R.string.default_web_client_id) }.getOrNull()
             ?: return
 
-        val googleIdOption = GetGoogleIdOption.Builder()
-            .setFilterByAuthorizedAccounts(true)
-            .setServerClientId(clientId)
-            .setAutoSelectEnabled(true)
-            .build()
+        val googleIdOption = runCatching {
+            GetGoogleIdOption.Builder()
+                .setFilterByAuthorizedAccounts(true)
+                .setServerClientId(clientId)
+                .setAutoSelectEnabled(true)
+                .build()
+        }.getOrNull() ?: return
 
         val request = GetCredentialRequest.Builder()
             .addCredentialOption(googleIdOption)
             .build()
 
-        val credentialManager = CredentialManager.create(context)
+        val credentialManager = runCatching { CredentialManager.create(context) }.getOrNull() ?: return
         viewModelScope.launch {
             try {
-                val result = credentialManager.getCredential(context as? Activity ?: context, request)
+                val result = withContext(Dispatchers.IO) {
+                    credentialManager.getCredential(context as? Activity ?: context, request)
+                }
                 val credential = result.credential
                 if (credential is CustomCredential &&
                     credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
@@ -178,8 +184,7 @@ class AuthViewModel(
             } catch (e: Exception) {
                 Log.e(TAG, "Google Sign-In failed", e)
                 _isLoading.value = false
-                _errorMessage.value = e.localizedMessage
-                    ?: "Google Sign-In could not complete. Try again or explore offline."
+                _errorMessage.value = "Google Sign-In requires an active device account in preview. Tap '🧪 Generate Dynamic Test Account' below to explore instantly!"
             }
         }
     }
@@ -209,11 +214,52 @@ class AuthViewModel(
             hearts = 5,
             completedLessons = listOf("m_1", "p_1")
         )
+        localProfileStore?.saveProfile(previewProfile)
         _userProfile.value = previewProfile
         _authGateState.value = if (startOnboarding) {
             AuthGateState.NeedsOnboarding(previewProfile, isOfflinePreview = true)
         } else {
             AuthGateState.Authenticated(previewProfile, isOfflinePreview = true)
+        }
+    }
+
+    fun generateDynamicTestAccount(startOnboarding: Boolean = true) {
+        isOfflinePreviewMode = true
+        _errorMessage.value = null
+        val randomNum = (1000..9999).random()
+        val randomNames = listOf("Aryan", "Rohan", "Ananya", "Priya", "Vikram", "Neha", "Kabir", "Meera", "Arjun", "Diya")
+        val randomName = randomNames.random() + " Scholar"
+        val handle = randomName.substringBefore(" ").lowercase() + randomNum
+        val uid = "test_acc_${System.currentTimeMillis()}"
+
+        val testProfile = UserProfile(
+            uid = uid,
+            name = randomName,
+            email = "${handle}@vidhyascholars.test",
+            vidyaId = if (startOnboarding) "" else "$handle#$randomNum",
+            vidyaHandle = handle,
+            vidyaDiscriminator = randomNum.toString(),
+            vidyaKey = if (startOnboarding) "" else "${handle}_$randomNum",
+            contactCode = if (startOnboarding) "" else "$handle#$randomNum",
+            avatarMode = AvatarMode.PRESET.name,
+            avatarPresetId = "vedic_strategist",
+            avatarCrestId = "yantra",
+            avatarFrameId = "astrolabe",
+            avatarToneId = "saffron",
+            focusRealm = "MATHEMATICS",
+            onboardingCompleted = !startOnboarding,
+            streak = 5,
+            xp = 1200,
+            level = "Silver Prodigy",
+            hearts = 5,
+            completedLessons = listOf("m_1")
+        )
+        localProfileStore?.saveProfile(testProfile)
+        _userProfile.value = testProfile
+        _authGateState.value = if (startOnboarding) {
+            AuthGateState.NeedsOnboarding(testProfile, isOfflinePreview = true)
+        } else {
+            AuthGateState.Authenticated(testProfile, isOfflinePreview = true)
         }
     }
 
@@ -227,28 +273,77 @@ class AuthViewModel(
         _authGateState.value = AuthGateState.Loading
 
         viewModelScope.launch {
-            val initResult = repository.getOrInitializeUserProfile(uid, defaultName, email, photoUrl)
-            initResult.onSuccess { initialProfile ->
-                updateGateFromProfile(initialProfile, isOffline = false)
-            }.onFailure { err ->
-                _errorMessage.value = err.localizedMessage ?: "Failed to load your scholar profile."
+            val cachedProfile = withContext(Dispatchers.IO) { localProfileStore?.getProfile(uid) }
+            val initResult = kotlinx.coroutines.withTimeoutOrNull(4_500L) {
+                withContext(Dispatchers.IO) {
+                    repository.getOrInitializeUserProfile(uid, defaultName, email, photoUrl)
+                }
             }
-
-            profileObserverJob = viewModelScope.launch {
-                repository.observeUserProfile(uid)
-                    .catch { error ->
-                        Log.w(TAG, "Profile stream error: ${error.message}", error)
-                    }
-                    .collect { profile ->
-                        if (profile != null && !isOfflinePreviewMode) {
-                            updateGateFromProfile(profile, isOffline = false)
-                        }
-                    }
+            if (initResult != null && initResult.isSuccess) {
+                initResult.getOrNull()?.let { initialProfile ->
+                    val mergedProfile = mergePendingOfflineProgress(initialProfile)
+                    withContext(Dispatchers.IO) { localProfileStore?.saveProfile(mergedProfile) }
+                    updateGateFromProfile(mergedProfile, isOffline = false)
+                }
+                attachProfileObserver(uid)
+            } else if (cachedProfile != null && !isOfflinePreviewMode) {
+                updateGateFromProfile(cachedProfile, isOffline = false)
+                attachProfileObserver(uid)
+            } else {
+                val errMsg = initResult?.exceptionOrNull()?.localizedMessage
+                    ?: "Connection timed out loading your scholar profile. Check network or explore offline below."
+                _errorMessage.value = errMsg
+                if (!isOfflinePreviewMode) {
+                    _userProfile.value = null
+                    _authGateState.value = AuthGateState.Unauthenticated
+                }
             }
         }
     }
 
+    private fun attachProfileObserver(uid: String) {
+        profileObserverJob?.cancel()
+        profileObserverJob = viewModelScope.launch {
+            repository.observeUserProfile(uid)
+                .catch { error ->
+                    Log.w(TAG, "Profile stream error: ${error.message}", error)
+                }
+                .collect { profile ->
+                    if (profile != null && !isOfflinePreviewMode) {
+                        val merged = mergePendingOfflineProgress(profile)
+                        withContext(Dispatchers.IO) { localProfileStore?.saveProfile(merged) }
+                        updateGateFromProfile(merged, isOffline = false)
+                    }
+                }
+        }
+    }
+
+    private suspend fun mergePendingOfflineProgress(remote: UserProfile): UserProfile {
+        val pending = withContext(Dispatchers.IO) {
+            localProfileStore?.getPendingProfileProgress(remote.uid)
+        } ?: return remote
+
+        val mergedLessons = (remote.completedLessons + pending.completedLessons).distinct()
+        val mergedXp = maxOf(remote.xp, pending.xp)
+        val mergedLevel = if (mergedXp >= remote.xp) pending.level else remote.level
+        val updated = remote.copy(
+            xp = mergedXp,
+            level = mergedLevel,
+            completedLessons = mergedLessons
+        )
+        val syncResult = withContext(Dispatchers.IO) {
+            repository.updateLearningProgress(updated)
+        }
+        if (syncResult.isSuccess) {
+            withContext(Dispatchers.IO) {
+                localProfileStore?.clearPendingProfileProgress(remote.uid)
+            }
+        }
+        return updated
+    }
+
     private fun updateGateFromProfile(profile: UserProfile, isOffline: Boolean) {
+        localProfileStore?.saveProfile(profile)
         _userProfile.value = profile
         _authGateState.value = if (!profile.onboardingCompleted || profile.vidyaId.isBlank()) {
             AuthGateState.NeedsOnboarding(profile, isOfflinePreview = isOffline)
@@ -313,6 +408,9 @@ class AuthViewModel(
         discriminator: String,
         avatarSpec: AvatarSpec,
         focusRealm: String,
+        standardId: String = "class_11",
+        streamId: String = "science_pcm",
+        batchType: String = "live",
         onError: (String) -> Unit = {}
     ) {
         val current = _userProfile.value ?: return
@@ -338,6 +436,9 @@ class AuthViewModel(
                 avatarToneId = avatarSpec.toneId,
                 localAvatarPhotoPath = avatarSpec.localPhotoPath,
                 focusRealm = focusRealm,
+                standardId = standardId,
+                streamId = streamId,
+                batchType = batchType,
                 onboardingCompleted = true
             )
             updateGateFromProfile(updated, isOffline = true)
@@ -354,7 +455,10 @@ class AuthViewModel(
                 handle = normalizedHandle,
                 discriminator = discriminator,
                 avatarSpec = avatarSpec,
-                focusRealm = focusRealm
+                focusRealm = focusRealm,
+                standardId = standardId,
+                streamId = streamId,
+                batchType = batchType
             )
             _isLoading.value = false
             result.onSuccess { saved ->
@@ -363,6 +467,45 @@ class AuthViewModel(
                 val msg = err.localizedMessage ?: "Could not save your Vidya ID. Try shuffling the code."
                 _errorMessage.value = msg
                 onError(msg)
+            }
+        }
+    }
+
+    fun updateCurriculumEnrollment(
+        standardId: String,
+        streamId: String,
+        batchType: String,
+        completedStandards: List<String>? = null,
+        onComplete: (Boolean, String?) -> Unit = { _, _ -> }
+    ) {
+        val current = _userProfile.value ?: return
+        val targetCompletedStandards = completedStandards ?: current.completedStandards
+        val updated = current.copy(
+            standardId = standardId,
+            streamId = streamId,
+            batchType = batchType,
+            completedStandards = targetCompletedStandards
+        )
+
+        if (isOfflinePreviewMode || auth.currentUser == null) {
+            updateGateFromProfile(updated, isOffline = true)
+            onComplete(true, null)
+            return
+        }
+
+        viewModelScope.launch {
+            val result = repository.updateCurriculumEnrollment(
+                profile = current,
+                standardId = standardId,
+                streamId = streamId,
+                batchType = batchType,
+                completedStandards = targetCompletedStandards
+            )
+            result.onSuccess { saved ->
+                updateGateFromProfile(saved, isOffline = false)
+                onComplete(true, null)
+            }.onFailure { err ->
+                onComplete(false, err.localizedMessage ?: "Failed to update enrollment.")
             }
         }
     }
@@ -431,15 +574,21 @@ class AuthViewModel(
             completedLessons = updatedLessons
         )
         _userProfile.value = updated
-        if (!isOfflinePreviewMode && auth.currentUser != null && !current.uid.startsWith("demo_")) {
-            viewModelScope.launch {
-                repository.updateLearningProgress(updated)
+        viewModelScope.launch(Dispatchers.IO) {
+            localProfileStore?.saveProfile(updated)
+            if (!isOfflinePreviewMode && auth.currentUser != null && !current.uid.startsWith("demo_")) {
+                localProfileStore?.queuePendingProfileProgress(updated)
+                val result = repository.updateLearningProgress(updated)
+                if (result.isSuccess) {
+                    localProfileStore?.clearPendingProfileProgress(updated.uid)
+                }
             }
         }
     }
 
     fun signOut(context: Context, onSignOutComplete: () -> Unit = {}) {
         val credentialManager = CredentialManager.create(context)
+        val activeUid = _userProfile.value?.uid ?: auth.currentUser?.uid.orEmpty()
         isOfflinePreviewMode = false
         stopObservingProfile()
         _errorMessage.value = null
@@ -447,6 +596,9 @@ class AuthViewModel(
         viewModelScope.launch {
             withContext(NonCancellable) {
                 try {
+                    if (activeUid.isNotBlank()) {
+                        localProfileStore?.clearProfile(activeUid)
+                    }
                     credentialManager.clearCredentialState(ClearCredentialStateRequest())
                 } catch (e: Exception) {
                     Log.w(TAG, "Failed to clear credential state: ${e.message}")

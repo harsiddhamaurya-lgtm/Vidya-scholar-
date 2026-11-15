@@ -10,6 +10,7 @@ import com.example.data.PracticePeersCatalog
 import com.example.data.UserProfile
 import com.example.data.VidyaIdentityCard
 import com.example.data.handleFirestoreError
+import com.example.security.KeystoreCryptoManager
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
@@ -121,18 +122,49 @@ class ScholarIdentityRepository(private val db: FirebaseFirestore) {
         val docRef = db.collection(COLLECTION_USERS).document(uid)
         return try {
             val snapshot = docRef.get().await()
+            val publicKeyB64 = runCatching { KeystoreCryptoManager.ensureIdentityKeyPair(uid) }.getOrDefault("")
             if (snapshot.exists()) {
                 val existing = snapshot.toObject(
                     UserProfile::class.java,
                     DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
                 )
                 if (existing != null) {
-                    return Result.success(existing)
+                    val updates = mutableMapOf<String, Any>(
+                        "email" to email.take(120),
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                    if (photoUrl.isNotBlank()) {
+                        updates["photoUrl"] = photoUrl.take(500)
+                    }
+                    if (publicKeyB64.isNotBlank() && existing.publicKey != publicKeyB64) {
+                        updates["publicKey"] = publicKeyB64.take(1024)
+                        updates["keyVersion"] = 1
+                    }
+                    docRef.set(updates, SetOptions.merge())
+                    if (publicKeyB64.isNotBlank() && existing.vidyaKey.isNotBlank()) {
+                        runCatching {
+                            db.collection(COLLECTION_VIDYA_IDS).document(existing.vidyaKey)
+                                .update(
+                                    mapOf(
+                                        "publicKey" to publicKeyB64.take(1024),
+                                        "keyVersion" to 1,
+                                        "updatedAt" to FieldValue.serverTimestamp()
+                                    )
+                                ).await()
+                        }
+                    }
+                    return Result.success(
+                        existing.copy(
+                            email = email.ifBlank { existing.email }.take(120),
+                            photoUrl = photoUrl.ifBlank { existing.photoUrl }.take(500),
+                            publicKey = publicKeyB64.ifBlank { existing.publicKey }
+                        )
+                    )
                 }
             }
 
             val safeName = defaultName.trim().ifBlank { "Scholar" }.take(60)
-            val payload = mapOf(
+            val payload = mutableMapOf<String, Any>(
                 "uid" to uid,
                 "name" to safeName,
                 "email" to email.take(120),
@@ -155,6 +187,8 @@ class ScholarIdentityRepository(private val db: FirebaseFirestore) {
                 "level" to "Bronze Scholar",
                 "hearts" to 5,
                 "completedLessons" to emptyList<String>(),
+                "publicKey" to publicKeyB64.take(1024),
+                "keyVersion" to 1,
                 "createdAt" to FieldValue.serverTimestamp(),
                 "updatedAt" to FieldValue.serverTimestamp()
             )
@@ -168,7 +202,9 @@ class ScholarIdentityRepository(private val db: FirebaseFirestore) {
                 streak = 1,
                 xp = 100,
                 level = "Bronze Scholar",
-                hearts = 5
+                hearts = 5,
+                publicKey = publicKeyB64,
+                keyVersion = 1
             )
             Result.success(created)
         } catch (e: CancellationException) {
@@ -216,7 +252,10 @@ class ScholarIdentityRepository(private val db: FirebaseFirestore) {
         handle: String,
         discriminator: String,
         avatarSpec: AvatarSpec,
-        focusRealm: String
+        focusRealm: String,
+        standardId: String = "class_11",
+        streamId: String = "science_pcm",
+        batchType: String = "live"
     ): Result<UserProfile> {
         val normalizedHandle = VidyaIdFormatter.normalizeHandle(handle)
         if (!VidyaIdFormatter.isValidHandle(normalizedHandle)) {
@@ -232,6 +271,7 @@ class ScholarIdentityRepository(private val db: FirebaseFirestore) {
         val safeName = displayName.trim().ifBlank { "Scholar" }.take(60)
         val vidyaId = VidyaIdFormatter.formatVidyaId(normalizedHandle, discriminator)
         val newKey = VidyaIdFormatter.toDocumentKey(normalizedHandle, discriminator)
+        val publicKeyB64 = runCatching { KeystoreCryptoManager.ensureIdentityKeyPair(uid) }.getOrDefault("")
 
         val userRef = db.collection(COLLECTION_USERS).document(uid)
         val newCardRef = db.collection(COLLECTION_VIDYA_IDS).document(newKey)
@@ -275,6 +315,8 @@ class ScholarIdentityRepository(private val db: FirebaseFirestore) {
                     "avatarFrameId" to avatarSpec.frameId,
                     "avatarToneId" to avatarSpec.toneId,
                     "focusRealm" to focusRealm,
+                    "publicKey" to publicKeyB64.take(1024),
+                    "keyVersion" to 1,
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
                 if (!newCardSnap.exists()) {
@@ -302,12 +344,18 @@ class ScholarIdentityRepository(private val db: FirebaseFirestore) {
                     "avatarToneId" to avatarSpec.toneId,
                     "localAvatarPhotoPath" to avatarSpec.localPhotoPath.take(400),
                     "focusRealm" to focusRealm,
+                    "standardId" to standardId,
+                    "streamId" to streamId,
+                    "batchType" to batchType,
+                    "completedStandards" to emptyList<String>(),
                     "onboardingCompleted" to true,
                     "streak" to currentStreak,
                     "xp" to currentXp,
                     "level" to currentLevel,
                     "hearts" to currentHearts,
                     "completedLessons" to currentLessons,
+                    "publicKey" to publicKeyB64.take(1024),
+                    "keyVersion" to 1,
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
                 if (!userSnap.exists()) {
@@ -335,12 +383,18 @@ class ScholarIdentityRepository(private val db: FirebaseFirestore) {
                     avatarToneId = avatarSpec.toneId,
                     localAvatarPhotoPath = avatarSpec.localPhotoPath,
                     focusRealm = focusRealm,
+                    standardId = standardId,
+                    streamId = streamId,
+                    batchType = batchType,
+                    completedStandards = emptyList(),
                     onboardingCompleted = true,
                     streak = currentStreak,
                     xp = currentXp,
                     level = currentLevel,
                     hearts = currentHearts,
-                    completedLessons = currentLessons
+                    completedLessons = currentLessons,
+                    publicKey = publicKeyB64,
+                    keyVersion = 1
                 )
             }.await()
 
@@ -418,6 +472,39 @@ class ScholarIdentityRepository(private val db: FirebaseFirestore) {
         }
     }
 
+    suspend fun updateCurriculumEnrollment(
+        profile: UserProfile,
+        standardId: String,
+        streamId: String,
+        batchType: String,
+        completedStandards: List<String> = profile.completedStandards
+    ): Result<UserProfile> {
+        val userRef = db.collection(COLLECTION_USERS).document(profile.uid)
+        return try {
+            val payload = mapOf(
+                "standardId" to standardId,
+                "streamId" to streamId,
+                "batchType" to batchType,
+                "completedStandards" to completedStandards,
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+            userRef.set(payload, SetOptions.merge()).await()
+            Result.success(
+                profile.copy(
+                    standardId = standardId,
+                    streamId = streamId,
+                    batchType = batchType,
+                    completedStandards = completedStandards
+                )
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, userRef.path)
+            Result.failure(e)
+        }
+    }
+
     suspend fun updateLearningProgress(profile: UserProfile): Result<Unit> {
         val userRef = db.collection(COLLECTION_USERS).document(profile.uid)
         return try {
@@ -433,7 +520,28 @@ class ScholarIdentityRepository(private val db: FirebaseFirestore) {
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.UPDATE, userRef.path)
+            Log.w(TAG, "Offline sync pending for learning progress: ${e.message}")
+            Result.failure(e)
+        }
+    }
+
+    suspend fun syncCompletedLessonsSnapshot(uid: String, completedIds: List<String>): Result<Unit> {
+        if (uid.isBlank() || uid.startsWith("demo_") || completedIds.isEmpty()) {
+            return Result.success(Unit)
+        }
+        val userRef = db.collection(COLLECTION_USERS).document(uid)
+        return try {
+            userRef.update(
+                mapOf(
+                    "completedLessons" to FieldValue.arrayUnion(*completedIds.take(200).toTypedArray()),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "Offline lesson sync deferred: ${e.message}")
             Result.failure(e)
         }
     }

@@ -23,5 +23,8 @@ data class GameSessionConfig(
     val players: List<PlayerSetup> = emptyList(),
     val difficulty: String = "TACTICIAN", // NOVICE, TACTICIAN, GRANDMASTER
     val timeControlMinutes: Int = 10, // 0 = unlimited, 5 = blitz, 10 = rapid
-    val tournamentRound: String = "Quarter-Finals"
+    val tournamentRound: String = "Quarter-Finals",
+    val onlineMatchId: String = "",
+    val localParticipantUid: String = "",
+    val localPlayerIndex: Int = 0
 )

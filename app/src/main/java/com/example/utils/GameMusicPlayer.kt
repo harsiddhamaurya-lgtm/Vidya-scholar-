@@ -126,25 +126,35 @@ object GameMusicPlayer {
                 val melodyFreq = pattern[noteIndex % pattern.size]
                 val harmonicFreq = if (isJoyful) melodyFreq * 2.0 else droneFreq * 1.5
 
-                for (i in 0 until samplesPerNote) {
-                    val tLocal = i.toDouble() / sampleRate
-                    val tGlobal = (globalSample + i).toDouble() / sampleRate
+                if (NativeCoreBridge.isAvailable()) {
+                    NativeCoreBridge.nativeSynthesizeMusicNote(
+                        pcmBuffer,
+                        sampleRate,
+                        melodyFreq,
+                        harmonicFreq,
+                        droneFreq,
+                        isJoyful,
+                        globalSample
+                    )
+                } else {
+                    for (i in 0 until samplesPerNote) {
+                        val tLocal = i.toDouble() / sampleRate
+                        val tGlobal = (globalSample + i).toDouble() / sampleRate
 
-                    // Smooth attack (25ms) & natural exponential decay so there are zero clicks
-                    val attack = (tLocal / 0.025).coerceIn(0.0, 1.0)
-                    val decayRate = if (isJoyful) 5.5 else 2.2
-                    val env = attack * exp(-decayRate * tLocal)
+                        val attack = (tLocal / 0.025).coerceIn(0.0, 1.0)
+                        val decayRate = if (isJoyful) 5.5 else 2.2
+                        val env = attack * exp(-decayRate * tLocal)
 
-                    val melodyWave = sin(2.0 * PI * melodyFreq * tLocal) * 0.65 +
-                        sin(2.0 * PI * harmonicFreq * tLocal) * (if (isJoyful) 0.18 else 0.12)
+                        val melodyWave = sin(2.0 * PI * melodyFreq * tLocal) * 0.65 +
+                            sin(2.0 * PI * harmonicFreq * tLocal) * (if (isJoyful) 0.18 else 0.12)
 
-                    // Gentle continuous ambient drone underneath
-                    val droneEnv = if (isJoyful) 0.25 else 0.42
-                    val droneWave = sin(2.0 * PI * droneFreq * tGlobal) * droneEnv +
-                        sin(2.0 * PI * (droneFreq * 1.5) * tGlobal) * (droneEnv * 0.45)
+                        val droneEnv = if (isJoyful) 0.25 else 0.42
+                        val droneWave = sin(2.0 * PI * droneFreq * tGlobal) * droneEnv +
+                            sin(2.0 * PI * (droneFreq * 1.5) * tGlobal) * (droneEnv * 0.45)
 
-                    val mixed = (melodyWave * env + droneWave) * 0.14 // Pleasant background volume
-                    pcmBuffer[i] = (mixed.coerceIn(-0.95, 0.95) * Short.MAX_VALUE).toInt().toShort()
+                        val mixed = (melodyWave * env + droneWave) * 0.14
+                        pcmBuffer[i] = (mixed.coerceIn(-0.95, 0.95) * Short.MAX_VALUE).toInt().toShort()
+                    }
                 }
 
                 audioTrack.write(pcmBuffer, 0, pcmBuffer.size)

@@ -20,12 +20,16 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.gestures.snapping.SnapPosition
 import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.lazy.LazyRow
@@ -50,12 +54,14 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.navigation.NavType
 import androidx.navigation.compose.*
 import androidx.navigation.navArgument
 import com.example.data.repository.ScholarIdentityRepository
+import com.example.security.LocalProfileStore
 import com.example.ui.screens.*
 import com.example.ui.theme.EduPulseTheme
 import com.example.utils.AppCheckHelper
@@ -64,10 +70,10 @@ import com.example.viewmodel.AiTutorViewModel
 import com.example.viewmodel.AuthGateState
 import com.example.viewmodel.AuthViewModel
 import com.example.viewmodel.ChatViewModel
-import com.example.viewmodel.GamesViewModel
 import com.example.viewmodel.ThemeViewModel
 import com.example.viewmodel.VidyaVaultViewModel
 import com.google.firebase.firestore.FirebaseFirestore
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -79,7 +85,10 @@ class MainActivity : ComponentActivity() {
     private val authViewModel: AuthViewModel by viewModels {
         viewModelFactory {
             initializer {
-                AuthViewModel(ScholarIdentityRepository(firestoreDb))
+                AuthViewModel(
+                    repository = ScholarIdentityRepository(firestoreDb),
+                    localProfileStore = LocalProfileStore(applicationContext)
+                )
             }
         }
     }
@@ -92,14 +101,15 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
-    private val gamesViewModel: GamesViewModel by viewModels()
     private val vidyaVaultViewModel: VidyaVaultViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        AppCheckHelper.configureAppCheck(this, intent)
+        lifecycleScope.launch(Dispatchers.Default) {
+            AppCheckHelper.configureAppCheck(applicationContext, intent)
+        }
 
         setContent {
             val themeMode by themeViewModel.themeMode.collectAsState()
@@ -130,11 +140,10 @@ class MainActivity : ComponentActivity() {
                             userProfile = gate.profile,
                             isOfflinePreview = gate.isOfflinePreview,
                             authViewModel = authViewModel,
-                            aiTutorViewModel = aiTutorViewModel,
                             themeViewModel = themeViewModel,
-                            chatViewModel = chatViewModel,
-                            gamesViewModel = gamesViewModel,
-                            vidyaVaultViewModel = vidyaVaultViewModel,
+                            getAiTutorViewModel = { aiTutorViewModel },
+                            getChatViewModel = { chatViewModel },
+                            getVidyaVaultViewModel = { vidyaVaultViewModel },
                             themeMode = themeMode
                         )
                     }
@@ -149,11 +158,10 @@ private fun AuthenticatedSanctuary(
     userProfile: com.example.data.UserProfile,
     isOfflinePreview: Boolean,
     authViewModel: AuthViewModel,
-    aiTutorViewModel: AiTutorViewModel,
     themeViewModel: ThemeViewModel,
-    chatViewModel: ChatViewModel,
-    gamesViewModel: GamesViewModel,
-    vidyaVaultViewModel: VidyaVaultViewModel,
+    getAiTutorViewModel: () -> AiTutorViewModel,
+    getChatViewModel: () -> ChatViewModel,
+    getVidyaVaultViewModel: () -> VidyaVaultViewModel,
     themeMode: com.example.viewmodel.AppThemeMode
 ) {
     key(userProfile.uid) {
@@ -170,6 +178,12 @@ private fun AuthenticatedSanctuary(
         val context = LocalContext.current
         val loadedTabs = remember { mutableStateListOf(0) }
         var isFirstLaunch by remember { mutableStateOf(true) }
+
+        LaunchedEffect(userProfile.uid, isOfflinePreview) {
+            if (!isOfflinePreview && userProfile.uid.isNotBlank() && !userProfile.uid.startsWith("demo_")) {
+                getVidyaVaultViewModel().tryFlushPendingSync()
+            }
+        }
 
         fun navigatePagerToTab(targetTab: Int, animate: Boolean) {
             val delta = shortestTabDelta(pagerState.currentPage.toTabIndex(), targetTab)
@@ -203,155 +217,310 @@ private fun AuthenticatedSanctuary(
         }
 
         val palette = com.example.ui.theme.LocalIndoPalette.current
-        Scaffold(
-            modifier = Modifier.fillMaxSize(),
-            containerColor = palette.baseBg,
-            bottomBar = {
-                val navBackStackEntry by navController.currentBackStackEntryAsState()
-                val currentRoute = navBackStackEntry?.destination?.route
-                if (currentRoute != null &&
-                    currentRoute != "auth" &&
-                    currentRoute != "profile" &&
-                    !currentRoute.startsWith("lesson_") &&
-                    !currentRoute.startsWith("chat_") &&
-                    !currentRoute.startsWith("vidya_quest_")
-                ) {
-                    ConveyorBeltTaskbar(
-                        currentPage = currentTab,
-                        onTabSelected = { targetTab, animate ->
-                            navigatePagerToTab(targetTab, animate)
-                        }
-                    )
+        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+            val sizeClass = when {
+                maxWidth >= 840.dp -> WindowWidthSizeClass.EXPANDED
+                maxWidth >= 600.dp -> WindowWidthSizeClass.MEDIUM
+                else -> WindowWidthSizeClass.COMPACT
+            }
+            val isTablet = sizeClass != WindowWidthSizeClass.COMPACT
+
+            val onTabSelected = remember(pagerState) {
+                { targetTab: Int, animate: Boolean ->
+                    navigatePagerToTab(targetTab, animate)
                 }
             }
-        ) { innerPadding ->
-            NavHost(
-                navController = navController,
-                startDestination = "main_pager",
-                modifier = Modifier.padding(innerPadding),
-                enterTransition = { com.example.utils.IndoMotion.mandalaEnterTransition() },
-                exitTransition = { com.example.utils.IndoMotion.mandalaExitTransition() },
-                popEnterTransition = { com.example.utils.IndoMotion.mandalaEnterTransition() },
-                popExitTransition = { com.example.utils.IndoMotion.mandalaExitTransition() }
+
+            if (isTablet) {
+                Row(modifier = Modifier.fillMaxSize().background(palette.baseBg)) {
+                    TabletNavigationRail(
+                        currentTab = currentTab,
+                        onTabSelected = onTabSelected
+                    )
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .padding(
+                                horizontal = if (sizeClass == WindowWidthSizeClass.EXPANDED) 32.dp else 16.dp,
+                                vertical = 12.dp
+                            ),
+                        contentAlignment = Alignment.TopCenter
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxHeight()
+                                .widthIn(max = if (sizeClass == WindowWidthSizeClass.EXPANDED) 960.dp else 800.dp)
+                        ) {
+                            SanctuaryNavHost(
+                                navController = navController,
+                                pagerState = pagerState,
+                                currentTab = currentTab,
+                                loadedTabs = loadedTabs,
+                                userProfile = userProfile,
+                                isOfflinePreview = isOfflinePreview,
+                                authViewModel = authViewModel,
+                                themeViewModel = themeViewModel,
+                                getAiTutorViewModel = getAiTutorViewModel,
+                                getChatViewModel = getChatViewModel,
+                                getVidyaVaultViewModel = getVidyaVaultViewModel,
+                                themeMode = themeMode,
+                                navigatePagerToTab = ::navigatePagerToTab
+                            )
+                        }
+                    }
+                }
+            } else {
+                Scaffold(
+                    modifier = Modifier.fillMaxSize(),
+                    containerColor = palette.baseBg,
+                    bottomBar = {
+                        val navBackStackEntry by navController.currentBackStackEntryAsState()
+                        val currentRoute = navBackStackEntry?.destination?.route
+                        if (currentRoute != null &&
+                            currentRoute != "auth" &&
+                            currentRoute != "profile" &&
+                            !currentRoute.startsWith("lesson_") &&
+                            !currentRoute.startsWith("chat_") &&
+                            !currentRoute.startsWith("vidya_quest_")
+                        ) {
+                            ConveyorBeltTaskbar(
+                                currentPage = currentTab,
+                                onTabSelected = onTabSelected
+                            )
+                        }
+                    }
+                ) { innerPadding ->
+                    Box(modifier = Modifier.padding(innerPadding)) {
+                        SanctuaryNavHost(
+                            navController = navController,
+                            pagerState = pagerState,
+                            currentTab = currentTab,
+                            loadedTabs = loadedTabs,
+                            userProfile = userProfile,
+                            isOfflinePreview = isOfflinePreview,
+                            authViewModel = authViewModel,
+                            themeViewModel = themeViewModel,
+                            getAiTutorViewModel = getAiTutorViewModel,
+                            getChatViewModel = getChatViewModel,
+                            getVidyaVaultViewModel = getVidyaVaultViewModel,
+                            themeMode = themeMode,
+                            navigatePagerToTab = ::navigatePagerToTab
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TabletNavigationRail(
+    currentTab: Int,
+    onTabSelected: (Int, Boolean) -> Unit
+) {
+    val context = LocalContext.current
+    val palette = com.example.ui.theme.LocalIndoPalette.current
+    NavigationRail(
+        containerColor = palette.cardSurface,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        header = {
+            Box(
+                modifier = Modifier
+                    .size(56.dp)
+                    .padding(8.dp),
+                contentAlignment = Alignment.Center
             ) {
-                composable("main_pager") {
-                    HorizontalPager(
-                        state = pagerState,
-                        modifier = Modifier.fillMaxSize(),
-                        beyondViewportPageCount = 0
-                    ) { virtualPage ->
-                        val page = virtualPage.toTabIndex()
-                        val targetTab = pagerState.targetPage.toTabIndex()
-                        if (page == currentTab || page == targetTab || loadedTabs.contains(page)) {
-                            when (page) {
-                                0 -> HomeScreen(
-                                    userProfile = userProfile,
-                                    onNavigateToCourse = { courseId -> navController.navigate("lesson_$courseId") },
-                                    onNavigateToAiTutor = { navigatePagerToTab(2, animate = true) },
-                                    onNavigateToCommunity = { navigatePagerToTab(3, animate = true) },
-                                    onNavigateToProfile = { navController.navigate("profile") },
-                                    vidyaViewModel = vidyaVaultViewModel,
-                                    onResumeQuestLevel = { realmId, level ->
-                                        navController.navigate("vidya_quest_${realmId.name}_${level.id}")
-                                    },
-                                    onLaunchDailyChallenge = { prompt ->
-                                        aiTutorViewModel.sendMessage(prompt)
-                                        navigatePagerToTab(2, animate = true)
-                                    }
-                                )
-                                1 -> CoursesScreen(
-                                    onNavigateToCourse = { courseId -> navController.navigate("lesson_$courseId") },
-                                    vidyaViewModel = vidyaVaultViewModel,
-                                    authViewModel = authViewModel
-                                )
-                                2 -> AiTutorScreen(
-                                    aiViewModel = aiTutorViewModel,
-                                    vidyaViewModel = vidyaVaultViewModel
-                                )
-                                3 -> MessagingLandingScreen(
-                                    userId = if (isOfflinePreview) "" else userProfile.uid,
-                                    userProfile = userProfile,
-                                    authViewModel = authViewModel,
-                                    chatViewModel = chatViewModel,
-                                    onNavigateToChat = { chatId -> navController.navigate("chat_$chatId") }
-                                )
-                                4 -> GamesScreen(
-                                    userProfile = userProfile,
-                                    gamesViewModel = gamesViewModel
-                                )
+                Icon(
+                    imageVector = Icons.Default.School,
+                    contentDescription = "App Logo",
+                    tint = palette.accentSaffron,
+                    modifier = Modifier.size(32.dp)
+                )
+            }
+        }
+    ) {
+        Spacer(modifier = Modifier.height(16.dp))
+        val tabs = listOf(
+            Triple(0, "Gyan", Icons.Default.Dashboard),
+            Triple(1, "Vidya", Icons.Default.AutoStories),
+            Triple(2, "Cosmos", Icons.Default.AutoAwesome),
+            Triple(3, "Varta", Icons.Default.ChatBubbleOutline),
+            Triple(4, "Khel", Icons.Default.SportsEsports)
+        )
+        for ((index, label, icon) in tabs) {
+            val selected = currentTab == index
+            NavigationRailItem(
+                selected = selected,
+                onClick = {
+                    SoundHelper.playWoodyTock(context)
+                    onTabSelected(index, true)
+                },
+                icon = {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = label,
+                        tint = if (selected) palette.accentSaffron else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                },
+                label = {
+                    Text(
+                        text = label,
+                        fontSize = 11.sp,
+                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
+                    )
+                },
+                colors = NavigationRailItemDefaults.colors(
+                    indicatorColor = palette.accentSaffron.copy(alpha = 0.2f)
+                )
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+        }
+    }
+}
+
+@Composable
+private fun SanctuaryNavHost(
+    navController: androidx.navigation.NavHostController,
+    pagerState: androidx.compose.foundation.pager.PagerState,
+    currentTab: Int,
+    loadedTabs: MutableList<Int>,
+    userProfile: com.example.data.UserProfile,
+    isOfflinePreview: Boolean,
+    authViewModel: AuthViewModel,
+    themeViewModel: ThemeViewModel,
+    getAiTutorViewModel: () -> AiTutorViewModel,
+    getChatViewModel: () -> ChatViewModel,
+    getVidyaVaultViewModel: () -> VidyaVaultViewModel,
+    themeMode: com.example.viewmodel.AppThemeMode,
+    navigatePagerToTab: (Int, Boolean) -> Unit
+) {
+    NavHost(
+        navController = navController,
+        startDestination = "main_pager",
+        modifier = Modifier.fillMaxSize(),
+        enterTransition = { com.example.utils.IndoMotion.mandalaEnterTransition() },
+        exitTransition = { com.example.utils.IndoMotion.mandalaExitTransition() },
+        popEnterTransition = { com.example.utils.IndoMotion.mandalaEnterTransition() },
+        popExitTransition = { com.example.utils.IndoMotion.mandalaExitTransition() }
+    ) {
+        composable("main_pager") {
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier.fillMaxSize(),
+                beyondViewportPageCount = 0
+            ) { virtualPage ->
+                val page = virtualPage.toTabIndex()
+                val targetTab = pagerState.targetPage.toTabIndex()
+                if (page == currentTab || page == targetTab || loadedTabs.contains(page)) {
+                    when (page) {
+                        0 -> HomeScreen(
+                            userProfile = userProfile,
+                            onNavigateToCourse = { courseId -> navController.navigate("lesson_$courseId") },
+                            onNavigateToAiTutor = { navigatePagerToTab(2, true) },
+                            onNavigateToCommunity = { navigatePagerToTab(3, true) },
+                            onNavigateToProfile = { navController.navigate("profile") },
+                            vidyaViewModel = remember { getVidyaVaultViewModel() },
+                            onResumeQuestLevel = { realmId, level ->
+                                navController.navigate("vidya_quest_${realmId.name}_${level.id}")
+                            },
+                            onLaunchDailyChallenge = { prompt ->
+                                getAiTutorViewModel().sendMessage(prompt)
+                                navigatePagerToTab(2, true)
                             }
-                        } else {
-                            LazyTabSkeleton(page = page)
-                        }
-                    }
-                }
-
-                composable(
-                    route = "lesson_{courseId}",
-                    arguments = listOf(navArgument("courseId") { type = NavType.StringType })
-                ) { backStackEntry ->
-                    val courseId = backStackEntry.arguments?.getString("courseId") ?: "math_101"
-                    LessonDetailScreen(
-                        courseId = courseId,
-                        authViewModel = authViewModel,
-                        onBack = { navController.popBackStack() }
-                    )
-                }
-
-                composable(
-                    route = "vidya_quest_{realmName}_{levelId}",
-                    arguments = listOf(
-                        navArgument("realmName") { type = NavType.StringType },
-                        navArgument("levelId") { type = NavType.StringType }
-                    )
-                ) { backStackEntry ->
-                    val realmName = backStackEntry.arguments?.getString("realmName") ?: com.example.data.RealmId.MATHEMATICS.name
-                    val levelId = backStackEntry.arguments?.getString("levelId") ?: ""
-                    val realmId = runCatching { com.example.data.RealmId.valueOf(realmName) }
-                        .getOrDefault(com.example.data.RealmId.MATHEMATICS)
-                    val realm = com.example.data.VidyaRepository.getRealm(realmId)
-                    val level = realm.levels.firstOrNull { it.id == levelId } ?: realm.levels.first()
-                    if (level.isBossBattle) {
-                        BossBattleArenaScreen(
-                            level = level,
-                            realm = realm,
-                            vidyaViewModel = vidyaVaultViewModel,
-                            authViewModel = authViewModel,
-                            onBack = { navController.popBackStack() }
                         )
-                    } else {
-                        LevelQuestRunnerScreen(
-                            level = level,
-                            realm = realm,
-                            vidyaViewModel = vidyaVaultViewModel,
+                        1 -> CoursesScreen(
+                            onNavigateToCourse = { courseId -> navController.navigate("lesson_$courseId") },
+                            vidyaViewModel = remember { getVidyaVaultViewModel() },
+                            authViewModel = authViewModel
+                        )
+                        2 -> AiTutorScreen(
+                            aiViewModel = remember { getAiTutorViewModel() },
+                            vidyaViewModel = remember { getVidyaVaultViewModel() },
+                            isCosmosActive = (currentTab == 2 && !pagerState.isScrollInProgress)
+                        )
+                        3 -> MessagingLandingScreen(
+                            userId = if (isOfflinePreview) "" else userProfile.uid,
+                            userProfile = userProfile,
                             authViewModel = authViewModel,
-                            onBack = { navController.popBackStack() }
+                            chatViewModel = remember { getChatViewModel() },
+                            onNavigateToChat = { chatId -> navController.navigate("chat_$chatId") }
+                        )
+                        4 -> GamesScreen(
+                            userProfile = userProfile
                         )
                     }
-                }
-
-                composable("chat_{chatId}") { backStackEntry ->
-                    ChatDetailScreen(
-                        chatId = backStackEntry.arguments?.getString("chatId") ?: "",
-                        senderId = if (isOfflinePreview) "" else userProfile.uid,
-                        userProfile = userProfile,
-                        chatViewModel = chatViewModel,
-                        onBack = { navController.popBackStack() }
-                    )
-                }
-
-                composable("profile") {
-                    ProfileScreen(
-                        userProfile = userProfile,
-                        isOfflinePreview = isOfflinePreview,
-                        authViewModel = authViewModel,
-                        themeViewModel = themeViewModel,
-                        currentThemeMode = themeMode,
-                        onBack = { navController.popBackStack() },
-                        onSignedOut = { navController.popBackStack() }
-                    )
+                } else {
+                    LazyTabSkeleton(page = page)
                 }
             }
+        }
+
+        composable(
+            route = "lesson_{courseId}",
+            arguments = listOf(navArgument("courseId") { type = NavType.StringType })
+        ) { backStackEntry ->
+            val courseId = backStackEntry.arguments?.getString("courseId") ?: "math_101"
+            LessonDetailScreen(
+                courseId = courseId,
+                authViewModel = authViewModel,
+                onBack = { navController.popBackStack() }
+            )
+        }
+
+        composable(
+            route = "vidya_quest_{realmName}_{levelId}",
+            arguments = listOf(
+                navArgument("realmName") { type = NavType.StringType },
+                navArgument("levelId") { type = NavType.StringType }
+            )
+        ) { backStackEntry ->
+            val realmName = backStackEntry.arguments?.getString("realmName") ?: com.example.data.RealmId.MATHEMATICS.name
+            val levelId = backStackEntry.arguments?.getString("levelId") ?: ""
+            val realmId = runCatching { com.example.data.RealmId.valueOf(realmName) }
+                .getOrDefault(com.example.data.RealmId.MATHEMATICS)
+            val realm = com.example.data.VidyaRepository.getRealm(realmId)
+            val level = realm.levels.firstOrNull { it.id == levelId } ?: realm.levels.first()
+            val vidyaVaultVm = remember { getVidyaVaultViewModel() }
+            if (level.isBossBattle) {
+                BossBattleArenaScreen(
+                    level = level,
+                    realm = realm,
+                    vidyaViewModel = vidyaVaultVm,
+                    authViewModel = authViewModel,
+                    onBack = { navController.popBackStack() }
+                )
+            } else {
+                LevelQuestRunnerScreen(
+                    level = level,
+                    realm = realm,
+                    vidyaViewModel = vidyaVaultVm,
+                    authViewModel = authViewModel,
+                    onBack = { navController.popBackStack() }
+                )
+            }
+        }
+
+        composable("chat_{chatId}") { backStackEntry ->
+            ChatDetailScreen(
+                chatId = backStackEntry.arguments?.getString("chatId") ?: "",
+                senderId = if (isOfflinePreview) "" else userProfile.uid,
+                userProfile = userProfile,
+                chatViewModel = remember { getChatViewModel() },
+                onBack = { navController.popBackStack() }
+            )
+        }
+
+        composable("profile") {
+            ProfileScreen(
+                userProfile = userProfile,
+                isOfflinePreview = isOfflinePreview,
+                authViewModel = authViewModel,
+                themeViewModel = themeViewModel,
+                currentThemeMode = themeMode,
+                onBack = { navController.popBackStack() },
+                onSignedOut = { navController.popBackStack() }
+            )
         }
     }
 }
@@ -478,23 +647,11 @@ fun ConveyorBeltTaskbar(
             val itemSlotWidth = 72.dp
             val centerPadding = (maxWidth - itemSlotWidth) / 2
 
-            // Subtle atmospheric glow behind active center aperture
-            val infiniteTransition = rememberInfiniteTransition(label = "bubble_glow")
-            val pulseScale by infiniteTransition.animateFloat(
-                initialValue = 0.98f,
-                targetValue = 1.03f,
-                animationSpec = infiniteRepeatable(
-                    animation = tween(1400, easing = FastOutSlowInEasing),
-                    repeatMode = RepeatMode.Reverse
-                ),
-                label = "pulse"
-            )
-
+            // Subtle static atmospheric glow behind active center aperture (no 60fps idle loop)
             if (!palette.isEInk) {
                 Box(
                     modifier = Modifier
                         .size(70.dp)
-                        .scale(pulseScale)
                         .clip(CircleShape)
                         .background(
                             Brush.radialGradient(
@@ -646,4 +803,11 @@ fun LazyTabSkeleton(page: Int) {
         }
     }
 }
+
+enum class WindowWidthSizeClass {
+    COMPACT,
+    MEDIUM,
+    EXPANDED
+}
+
 

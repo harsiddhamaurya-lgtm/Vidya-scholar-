@@ -68,7 +68,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.R
+import com.example.data.AcademicStream
+import com.example.data.BatchType
 import com.example.data.RealmId
+import com.example.data.StandardGrade
 import com.example.data.UserProfile
 import com.example.data.repository.VidyaIdFormatter
 import com.example.ui.components.HybridAvatarStudioContent
@@ -115,6 +118,18 @@ fun OnboardingScreen(
         )
     }
     var avatarSpec by remember(profile.uid) { mutableStateOf(profile.toAvatarSpec()) }
+    var selectedStandard by remember(profile.uid) {
+        mutableStateOf(StandardGrade.fromId(profile.standardId))
+    }
+    var selectedStream by remember(profile.uid, selectedStandard) {
+        mutableStateOf(
+            if (!selectedStandard.hasStreams) AcademicStream.GENERAL_FOUNDATION
+            else AcademicStream.fromId(profile.streamId)
+        )
+    }
+    var selectedBatch by remember(profile.uid) {
+        mutableStateOf(BatchType.fromId(profile.batchType))
+    }
     var selectedRealm by remember(profile.uid) {
         mutableStateOf(
             runCatching { RealmId.valueOf(profile.focusRealm) }
@@ -283,7 +298,7 @@ fun OnboardingScreen(
                                 )
                             ) {
                                 Text(
-                                    text = if (currentStep == 0) "Next: Craft Avatar" else "Next: Focus Realm",
+                                    text = if (currentStep == 0) "Next: Craft Avatar" else "Next: Course & Batch",
                                     fontWeight = FontWeight.ExtraBold
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
@@ -300,6 +315,9 @@ fun OnboardingScreen(
                                         discriminator = discriminator,
                                         avatarSpec = avatarSpec,
                                         focusRealm = selectedRealm.name,
+                                        standardId = selectedStandard.id,
+                                        streamId = selectedStream.id,
+                                        batchType = selectedBatch.id,
                                         onError = { msg -> stepError = msg }
                                     )
                                 },
@@ -582,6 +600,7 @@ fun OnboardingScreen(
 
                         else -> {
                             Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                                // 1. STANDARD SELECTION (Class 9 - 12)
                                 IndoToneSurface(
                                     modifier = Modifier.fillMaxWidth(),
                                     shape = RoundedCornerShape(22.dp),
@@ -593,22 +612,204 @@ fun OnboardingScreen(
                                         verticalArrangement = Arrangement.spacedBy(10.dp)
                                     ) {
                                         Text(
-                                            text = "Select Your Primary Focus Realm",
+                                            text = "1. Select Academic Standard",
                                             style = MaterialTheme.typography.titleMedium,
                                             fontWeight = FontWeight.Bold,
                                             color = MaterialTheme.colorScheme.onSurface
                                         )
-                                        RealmId.entries.forEach { realm ->
-                                            val isSelected = selectedRealm == realm
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            StandardGrade.entries.forEach { grade ->
+                                                val isSelected = selectedStandard == grade
+                                                IndoToneSurface(
+                                                    onClick = {
+                                                        SoundHelper.playClick(context)
+                                                        selectedStandard = grade
+                                                        if (!grade.hasStreams) {
+                                                            selectedStream = AcademicStream.GENERAL_FOUNDATION
+                                                        } else if (selectedStream == AcademicStream.GENERAL_FOUNDATION) {
+                                                            selectedStream = AcademicStream.SCIENCE_PCM
+                                                        }
+                                                    },
+                                                    modifier = Modifier
+                                                        .weight(1f)
+                                                        .testTag("onboarding_grade_${grade.id}"),
+                                                    shape = RoundedCornerShape(14.dp),
+                                                    containerColor = if (isSelected) palette.secondaryIndigo else palette.elevatedSurface,
+                                                    hairlineColor = if (isSelected) palette.accentGold else palette.goldHairline,
+                                                    borderWidth = if (isSelected) 1.6.dp else 1.dp
+                                                ) {
+                                                    Column(
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .padding(vertical = 12.dp, horizontal = 4.dp),
+                                                        horizontalAlignment = Alignment.CenterHorizontally
+                                                    ) {
+                                                        Text(
+                                                            text = grade.shortName,
+                                                            fontWeight = FontWeight.ExtraBold,
+                                                            fontSize = 13.sp,
+                                                            color = if (isSelected) palette.accentGold else MaterialTheme.colorScheme.onSurface
+                                                        )
+                                                        Text(
+                                                            text = if (grade.hasStreams) "Streams" else "Foundation",
+                                                            fontSize = 10.sp,
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // 2. STREAM SELECTION (If Grade 11/12)
+                                IndoToneSurface(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(22.dp),
+                                    containerColor = palette.cardSurface,
+                                    hairlineColor = palette.goldHairline
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(16.dp),
+                                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        Text(
+                                            text = if (selectedStandard.hasStreams) "2. Select Stream" else "2. Academic Stream",
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+
+                                        if (!selectedStandard.hasStreams) {
+                                            IndoToneSurface(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                shape = RoundedCornerShape(14.dp),
+                                                containerColor = palette.elevatedSurface,
+                                                hairlineColor = palette.goldHairline
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier.padding(12.dp),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                                ) {
+                                                    Icon(Icons.Default.CheckCircle, contentDescription = null, tint = palette.accentGold, modifier = Modifier.size(20.dp))
+                                                    Column {
+                                                        Text(
+                                                            text = "Integrated Foundation Curriculum",
+                                                            fontWeight = FontWeight.Bold,
+                                                            fontSize = 13.sp,
+                                                            color = MaterialTheme.colorScheme.onSurface
+                                                        )
+                                                        Text(
+                                                            text = "Maths, Science, Social Studies, English & Coding/AI",
+                                                            fontSize = 11.sp,
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        } else {
+                                            val applicable = AcademicStream.streamsForStandard(selectedStandard.id)
+                                            applicable.forEach { stream ->
+                                                val isSelected = selectedStream == stream
+                                                IndoToneSurface(
+                                                    onClick = {
+                                                        SoundHelper.playClick(context)
+                                                        selectedStream = stream
+                                                    },
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .testTag("onboarding_stream_${stream.id}"),
+                                                    shape = RoundedCornerShape(14.dp),
+                                                    containerColor = if (isSelected) palette.secondaryIndigo else palette.elevatedSurface,
+                                                    hairlineColor = if (isSelected) palette.accentGold else palette.goldHairline,
+                                                    borderWidth = if (isSelected) 1.6.dp else 1.dp
+                                                ) {
+                                                    Row(
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .padding(12.dp),
+                                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        Column(modifier = Modifier.weight(1f)) {
+                                                            Row(
+                                                                verticalAlignment = Alignment.CenterVertically,
+                                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                            ) {
+                                                                Text(
+                                                                    text = stream.title,
+                                                                    fontWeight = FontWeight.Bold,
+                                                                    fontSize = 13.sp,
+                                                                    color = MaterialTheme.colorScheme.onSurface
+                                                                )
+                                                                Surface(
+                                                                    shape = RoundedCornerShape(50),
+                                                                    color = palette.accentSaffron.copy(alpha = 0.15f),
+                                                                    border = BorderStroke(0.7.dp, palette.accentSaffron.copy(alpha = 0.5f))
+                                                                ) {
+                                                                    Text(
+                                                                        text = stream.tagLabel,
+                                                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                                                        fontSize = 9.sp,
+                                                                        fontWeight = FontWeight.ExtraBold,
+                                                                        color = palette.accentSaffron
+                                                                    )
+                                                                }
+                                                            }
+                                                            Text(
+                                                                text = stream.description,
+                                                                fontSize = 11.sp,
+                                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                            )
+                                                        }
+                                                        if (isSelected) {
+                                                            Icon(
+                                                                Icons.Default.CheckCircle,
+                                                                contentDescription = "Selected",
+                                                                tint = palette.accentGold,
+                                                                modifier = Modifier.size(20.dp)
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // 3. BATCH MODALITY SELECTION
+                                IndoToneSurface(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(22.dp),
+                                    containerColor = palette.cardSurface,
+                                    hairlineColor = palette.goldHairline
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(16.dp),
+                                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        Text(
+                                            text = "3. Learning Modality / Batch",
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+
+                                        BatchType.entries.forEach { batch ->
+                                            val isSelected = selectedBatch == batch
                                             IndoToneSurface(
                                                 onClick = {
                                                     SoundHelper.playClick(context)
-                                                    selectedRealm = realm
+                                                    selectedBatch = batch
                                                 },
                                                 modifier = Modifier
                                                     .fillMaxWidth()
-                                                    .testTag("onboarding_realm_${realm.name.lowercase()}"),
-                                                shape = RoundedCornerShape(16.dp),
+                                                    .testTag("onboarding_batch_${batch.id}"),
+                                                shape = RoundedCornerShape(14.dp),
                                                 containerColor = if (isSelected) palette.secondaryIndigo else palette.elevatedSurface,
                                                 hairlineColor = if (isSelected) palette.accentGold else palette.goldHairline,
                                                 borderWidth = if (isSelected) 1.6.dp else 1.dp
@@ -616,35 +817,48 @@ fun OnboardingScreen(
                                                 Row(
                                                     modifier = Modifier
                                                         .fillMaxWidth()
-                                                        .padding(14.dp),
+                                                        .padding(12.dp),
                                                     horizontalArrangement = Arrangement.SpaceBetween,
                                                     verticalAlignment = Alignment.CenterVertically
                                                 ) {
                                                     Column(modifier = Modifier.weight(1f)) {
+                                                        Row(
+                                                            verticalAlignment = Alignment.CenterVertically,
+                                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                        ) {
+                                                            Text(
+                                                                text = batch.title,
+                                                                fontWeight = FontWeight.Bold,
+                                                                fontSize = 13.sp,
+                                                                color = MaterialTheme.colorScheme.onSurface
+                                                            )
+                                                            Surface(
+                                                                shape = RoundedCornerShape(50),
+                                                                color = palette.accentCyan.copy(alpha = 0.15f),
+                                                                border = BorderStroke(0.7.dp, palette.accentCyan.copy(alpha = 0.5f))
+                                                            ) {
+                                                                Text(
+                                                                    text = batch.badgeLabel,
+                                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                                                    fontSize = 9.sp,
+                                                                    fontWeight = FontWeight.ExtraBold,
+                                                                    color = palette.accentCyan
+                                                                )
+                                                            }
+                                                        }
                                                         Text(
-                                                            text = realm.subjectName,
-                                                            style = MaterialTheme.typography.titleSmall,
-                                                            fontWeight = FontWeight.Bold,
-                                                            color = MaterialTheme.colorScheme.onSurface
-                                                        )
-                                                        Text(
-                                                            text = realm.subtitle,
-                                                            style = MaterialTheme.typography.bodySmall,
+                                                            text = batch.description,
+                                                            fontSize = 11.sp,
                                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                                         )
                                                     }
                                                     if (isSelected) {
-                                                        Surface(
-                                                            shape = CircleShape,
-                                                            color = palette.accentSaffron
-                                                        ) {
-                                                            Icon(
-                                                                Icons.Default.CheckCircle,
-                                                                contentDescription = "Selected",
-                                                                tint = MaterialTheme.colorScheme.onPrimary,
-                                                                modifier = Modifier.padding(4.dp).size(18.dp)
-                                                            )
-                                                        }
+                                                        Icon(
+                                                            Icons.Default.CheckCircle,
+                                                            contentDescription = "Selected",
+                                                            tint = palette.accentGold,
+                                                            modifier = Modifier.size(20.dp)
+                                                        )
                                                     }
                                                 }
                                             }

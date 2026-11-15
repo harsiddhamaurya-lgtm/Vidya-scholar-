@@ -112,30 +112,31 @@ object SoundHelper {
         audioScope.launch {
             val sampleRate = 22050
             val durationSec = 0.65
-            val numSamples = (sampleRate * durationSec).toInt()
-            val buffer = ShortArray(numSamples)
-
-            // Sa (C4), Pa (G4), Sa' (C5), Ga' (E5) warm plucked tanpura/sitar swell
-            val freqs = doubleArrayOf(261.63, 392.00, 523.25, 659.25)
-            val entryTimes = doubleArrayOf(0.0, 0.06, 0.13, 0.21)
-
-            for (i in 0 until numSamples) {
-                val t = i.toDouble() / sampleRate
-                var mix = 0.0
-                for (k in freqs.indices) {
-                    val dt = t - entryTimes[k]
-                    if (dt > 0.0) {
-                        val env = (dt / 0.028).coerceIn(0.0, 1.0) * exp(-3.8 * dt)
-                        val f = freqs[k]
-                        // Rich sitar-like sympathetic shimmer (fundamental + octave + fifth harmonic)
-                        val voice = sin(2.0 * PI * f * dt) * 0.58 +
-                            sin(2.0 * PI * (f * 2.0) * dt) * 0.26 +
-                            sin(2.0 * PI * (f * 3.0) * dt) * 0.16
-                        mix += voice * env
+            val buffer = if (NativeCoreBridge.isAvailable()) {
+                NativeCoreBridge.nativeSynthesizeVictorySwell(sampleRate, durationSec)
+            } else {
+                val numSamples = (sampleRate * durationSec).toInt()
+                val out = ShortArray(numSamples)
+                val freqs = doubleArrayOf(261.63, 392.00, 523.25, 659.25)
+                val entryTimes = doubleArrayOf(0.0, 0.06, 0.13, 0.21)
+                for (i in 0 until numSamples) {
+                    val t = i.toDouble() / sampleRate
+                    var mix = 0.0
+                    for (k in freqs.indices) {
+                        val dt = t - entryTimes[k]
+                        if (dt > 0.0) {
+                            val env = (dt / 0.028).coerceIn(0.0, 1.0) * exp(-3.8 * dt)
+                            val f = freqs[k]
+                            val voice = sin(2.0 * PI * f * dt) * 0.58 +
+                                sin(2.0 * PI * (f * 2.0) * dt) * 0.26 +
+                                sin(2.0 * PI * (f * 3.0) * dt) * 0.16
+                            mix += voice * env
+                        }
                     }
+                    val sample = (mix * 0.22).coerceIn(-0.92, 0.92)
+                    out[i] = (sample * Short.MAX_VALUE).toInt().toShort()
                 }
-                val sample = (mix * 0.22).coerceIn(-0.92, 0.92)
-                buffer[i] = (sample * Short.MAX_VALUE).toInt().toShort()
+                out
             }
             writeOneShotPcm(sampleRate, buffer)
         }
@@ -161,6 +162,9 @@ object SoundHelper {
         sweep: Double,
         volume: Double
     ): ShortArray {
+        if (NativeCoreBridge.isAvailable()) {
+            return NativeCoreBridge.nativeSynthesizeWoodyTock(sampleRate, durationSec, baseFreq, sweep, volume)
+        }
         val numSamples = (sampleRate * durationSec).toInt()
         val buffer = ShortArray(numSamples)
         for (i in 0 until numSamples) {
@@ -182,19 +186,23 @@ object SoundHelper {
     ) {
         audioScope.launch {
             val sampleRate = 22050
-            val numSamples = (sampleRate * durationSec).toInt()
-            val buffer = ShortArray(numSamples)
-
-            for (i in 0 until numSamples) {
-                val t = i.toDouble() / sampleRate
-                val attack = (t / 0.008).coerceIn(0.0, 1.0)
-                val env = attack * exp(-14.5 * t)
-                val overtoneEnv = attack * exp(-22.0 * t)
-                val wave = sin(2.0 * PI * fundamental * t) * 0.65 * env +
-                    sin(2.0 * PI * (fundamental * 2.0) * t) * 0.22 * overtoneEnv +
-                    sin(2.0 * PI * (fundamental * 2.76) * t) * 0.13 * overtoneEnv
-                val sample = (wave * 0.26).coerceIn(-0.9, 0.9)
-                buffer[i] = (sample * Short.MAX_VALUE).toInt().toShort()
+            val buffer = if (NativeCoreBridge.isAvailable()) {
+                NativeCoreBridge.nativeSynthesizeTempleChime(sampleRate, durationSec, fundamental)
+            } else {
+                val numSamples = (sampleRate * durationSec).toInt()
+                val out = ShortArray(numSamples)
+                for (i in 0 until numSamples) {
+                    val t = i.toDouble() / sampleRate
+                    val attack = (t / 0.008).coerceIn(0.0, 1.0)
+                    val env = attack * exp(-14.5 * t)
+                    val overtoneEnv = attack * exp(-22.0 * t)
+                    val wave = sin(2.0 * PI * fundamental * t) * 0.65 * env +
+                        sin(2.0 * PI * (fundamental * 2.0) * t) * 0.22 * overtoneEnv +
+                        sin(2.0 * PI * (fundamental * 2.76) * t) * 0.13 * overtoneEnv
+                    val sample = (wave * 0.26).coerceIn(-0.9, 0.9)
+                    out[i] = (sample * Short.MAX_VALUE).toInt().toShort()
+                }
+                out
             }
             writeOneShotPcm(sampleRate, buffer)
         }

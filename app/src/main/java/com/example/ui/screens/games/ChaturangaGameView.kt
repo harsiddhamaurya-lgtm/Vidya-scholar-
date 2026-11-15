@@ -278,12 +278,14 @@ fun ChaturangaGameView(
                             state.allowedPieceType.firstOrNull()?.title?.split(" ")?.firstOrNull()
                         } else null
 
+                        val rulebookOpen = viewModel.rulebookGameType.collectAsState().value != null
                         AnimatedPasaDice(
                             diceValue = state.lastDiceValue,
                             isRolling = viewModel.isChaturangaDiceRolling,
                             accentColor = activeColor,
                             enabled = !state.hasRolled && !viewModel.isChaturangaDiceRolling && !state.isGameOver,
                             testTag = "chaturanga_dice_button",
+                            isActive = !state.isGameOver && !rulebookOpen,
                             pieceHint = pieceHint,
                             onClick = { viewModel.onRollChaturangaDice(context) }
                         )

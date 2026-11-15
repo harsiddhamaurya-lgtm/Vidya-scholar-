@@ -90,6 +90,9 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.data.ChatMessage
 import com.example.data.QuestNodeState
 import com.example.data.VidyaRepository
+import com.example.ui.components.CosmiumMood
+import com.example.ui.components.CosmiumOrb
+import com.example.ui.components.CosmiumStatusPill
 import com.example.ui.theme.IndoAtmosphericBackdrop
 import com.example.ui.theme.IndoToneSurface
 import com.example.ui.theme.LocalIndoPalette
@@ -97,6 +100,7 @@ import com.example.utils.SoundHelper
 import com.example.viewmodel.AiTutorViewModel
 import com.example.viewmodel.AiUiState
 import com.example.viewmodel.VidyaVaultViewModel
+import kotlinx.coroutines.delay
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
@@ -124,7 +128,8 @@ private val COSMOS_QUICK_PROMPTS = listOf(
 @Composable
 fun AiTutorScreen(
     aiViewModel: AiTutorViewModel,
-    vidyaViewModel: VidyaVaultViewModel = viewModel()
+    vidyaViewModel: VidyaVaultViewModel = viewModel(),
+    isCosmosActive: Boolean = true
 ) {
     val messages by aiViewModel.messages.collectAsState()
     val uiState by aiViewModel.uiState.collectAsState()
@@ -136,6 +141,69 @@ fun AiTutorScreen(
     var inputText by remember { mutableStateOf("") }
     var attachedBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var attachedLabel by remember { mutableStateOf<String?>(null) }
+    var transientMood by remember { mutableStateOf<CosmiumMood?>(CosmiumMood.SPEAKING) }
+    var tapIntensity by remember { mutableStateOf(0f) }
+
+    // Initial welcome greeting speaking animation (~4.5s)
+    LaunchedEffect(Unit) {
+        delay(4_500L)
+        if (transientMood == CosmiumMood.SPEAKING && uiState !is AiUiState.Loading) {
+            transientMood = null
+        }
+    }
+
+    // Expressive emotion transitions driven by Cosmos streaming/reply/error state
+    LaunchedEffect(uiState, messages.lastOrNull()?.text) {
+        when (uiState) {
+            is AiUiState.Loading -> {
+                val lastMsg = messages.lastOrNull()
+                if (lastMsg != null && !lastMsg.isUser && lastMsg.id != "cosmos_welcome") {
+                    // AI is actively streaming tokens -> speaking cadence
+                    transientMood = CosmiumMood.SPEAKING
+                } else {
+                    transientMood = null
+                }
+            }
+            is AiUiState.Success -> {
+                transientMood = CosmiumMood.SPEAKING
+                delay(4_200L)
+                if (transientMood == CosmiumMood.SPEAKING) {
+                    transientMood = null
+                }
+            }
+            is AiUiState.Error -> {
+                transientMood = CosmiumMood.ALERT
+                delay(3_000L)
+                if (transientMood == CosmiumMood.ALERT) {
+                    transientMood = null
+                }
+            }
+            AiUiState.Idle -> Unit
+        }
+    }
+
+    LaunchedEffect(tapIntensity) {
+        if (tapIntensity > 0f) {
+            delay(1_400L)
+            tapIntensity = 0f
+            if (transientMood == CosmiumMood.CELEBRATE) {
+                transientMood = null
+            }
+        }
+    }
+
+    val activeMood = when {
+        transientMood == CosmiumMood.CELEBRATE -> CosmiumMood.CELEBRATE
+        transientMood == CosmiumMood.SPEAKING -> CosmiumMood.SPEAKING
+        uiState is AiUiState.Loading -> CosmiumMood.THINKING
+        transientMood == CosmiumMood.ALERT -> CosmiumMood.ALERT
+        inputText.isNotBlank() -> CosmiumMood.CURIOUS
+        else -> CosmiumMood.IDLE
+    }
+
+    val typingIntensity = (inputText.length.coerceAtMost(30) / 30f) * 0.45f
+    val interactionIntensity = (typingIntensity + tapIntensity + if (activeMood == CosmiumMood.SPEAKING) 0.5f else 0f)
+        .coerceIn(0f, 1.3f)
 
     // Determine the student's current active level for contextual quick prompts
     val activeLevelSummary = remember(completedIds) {
@@ -189,7 +257,14 @@ fun AiTutorScreen(
             ) {
                 // 1. THE "COSMOS" REALM HEADER & CELESTIAL ASTROLABE AVATAR STAGE
                 CosmosHeaderCard(
-                    isThinking = uiState is AiUiState.Loading
+                    mood = activeMood,
+                    interactionIntensity = interactionIntensity,
+                    isCosmosActive = isCosmosActive,
+                    onAvatarTap = {
+                        SoundHelper.playClick(context)
+                        tapIntensity = 0.85f
+                        transientMood = CosmiumMood.CELEBRATE
+                    }
                 )
 
                 Spacer(modifier = Modifier.height(10.dp))
@@ -205,7 +280,11 @@ fun AiTutorScreen(
                 ) {
                     items(messages, key = { it.id }) { msg ->
                         when {
-                            msg.id == "cosmos_welcome" -> CosmosWelcomeSanctuaryCard(msg.text)
+                            msg.id == "cosmos_welcome" -> CosmosWelcomeSanctuaryCard(
+                                greeting = msg.text,
+                                mood = activeMood,
+                                interactionIntensity = interactionIntensity
+                            )
                             msg.isUser -> CosmosUserBubble(msg.text)
                             else -> CosmosAiReplyCard(msg.text)
                         }
@@ -349,48 +428,71 @@ private fun CosmosConstellationWatermark(
 @Composable
 fun CelestialAstrolabeAvatar(
     size: Dp,
-    isPulsingFast: Boolean = false
+    mood: CosmiumMood = CosmiumMood.IDLE,
+    interactionIntensity: Float = 0f,
+    useLive3D: Boolean = true,
+    onTap: (() -> Unit)? = null
 ) {
     val palette = LocalIndoPalette.current
-    val infiniteTransition = rememberInfiniteTransition(label = "celestial_astrolabe")
+    val shouldAnimate = useLive3D && !palette.isEInk
+    val isPulsingFast = mood == CosmiumMood.SPEAKING || mood == CosmiumMood.THINKING || mood == CosmiumMood.CELEBRATE
 
-    // Gentle breathing pulse animation so the space feels alive and attentive
-    val breathScale by infiniteTransition.animateFloat(
-        initialValue = 0.95f,
-        targetValue = 1.05f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(
-                durationMillis = if (isPulsingFast) 900 else 2400,
-                easing = CubicBezierEasing(0.16f, 1f, 0.3f, 1f)
+    // Gentle breathing pulse & orbit animation only while live Cosmos 3D stage is active
+    val breathScale: Float
+    val orbitAngle: Float
+    if (shouldAnimate) {
+        val infiniteTransition = rememberInfiniteTransition(label = "celestial_astrolabe")
+        val animatedBreath by infiniteTransition.animateFloat(
+            initialValue = 0.96f,
+            targetValue = 1.04f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(
+                    durationMillis = if (isPulsingFast) 900 else 2400,
+                    easing = CubicBezierEasing(0.16f, 1f, 0.3f, 1f)
+                ),
+                repeatMode = RepeatMode.Reverse
             ),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "astrolabe_breath"
-    )
-    val orbitAngle by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 22000, easing = LinearEasing)
-        ),
-        label = "astrolabe_orbit"
-    )
+            label = "astrolabe_breath"
+        )
+        val animatedOrbit by infiniteTransition.animateFloat(
+            initialValue = 0f,
+            targetValue = 360f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 22000, easing = LinearEasing)
+            ),
+            label = "astrolabe_orbit"
+        )
+        breathScale = animatedBreath
+        orbitAngle = animatedOrbit
+    } else {
+        breathScale = 1f
+        orbitAngle = 0f
+    }
+
+    val tapModifier = if (onTap != null) {
+        Modifier.clickable(
+            interactionSource = remember { MutableInteractionSource() },
+            indication = null,
+            onClick = onTap
+        )
+    } else Modifier
 
     Box(
         modifier = Modifier
             .size(size)
             .graphicsLayer {
-                if (!palette.isEInk) {
+                if (shouldAnimate) {
                     scaleX = breathScale
                     scaleY = breathScale
                 }
-            },
+            }
+            .then(tapModifier),
         contentAlignment = Alignment.Center
     ) {
         Canvas(modifier = Modifier.fillMaxSize()) {
             val c = Offset(this.size.width / 2f, this.size.height / 2f)
             val outerR = this.size.minDimension / 2f - 2.dp.toPx()
-            val innerR = outerR * 0.76f
+            val innerR = outerR * 0.78f
             val gold = if (palette.isEInk) palette.accentSaffron else Color(0xFFD4AF37)
             val cyan = if (palette.isEInk) palette.accentCyan else Color(0xFF00D2E6)
 
@@ -398,7 +500,7 @@ fun CelestialAstrolabeAvatar(
             if (!palette.isEInk) {
                 drawCircle(
                     brush = Brush.radialGradient(
-                        listOf(cyan.copy(alpha = 0.22f), gold.copy(alpha = 0.1f), Color.Transparent),
+                        listOf(Color(0xFFFFE066).copy(alpha = 0.24f), gold.copy(alpha = 0.08f), Color.Transparent),
                         center = c,
                         radius = outerR
                     ),
@@ -409,18 +511,18 @@ fun CelestialAstrolabeAvatar(
 
             // Outer Golden-Cyan Astrolabe Ring
             drawCircle(
-                brush = Brush.sweepGradient(listOf(gold, cyan, Color(0xFFE88D14), gold), c),
+                brush = Brush.sweepGradient(listOf(gold, Color(0xFFFFE066), cyan, gold), c),
                 radius = outerR,
                 center = c,
-                style = Stroke(width = 2.dp.toPx())
+                style = Stroke(width = 1.6.dp.toPx())
             )
 
             // Sacred geometric inner ring + astrolabe notches
             drawCircle(
-                color = gold.copy(alpha = 0.7f),
+                color = gold.copy(alpha = 0.55f),
                 radius = innerR,
                 center = c,
-                style = Stroke(width = 1.dp.toPx())
+                style = Stroke(width = 0.9.dp.toPx())
             )
 
             if (!palette.isEInk) {
@@ -429,42 +531,59 @@ fun CelestialAstrolabeAvatar(
                         val a = i * PI / 4.0
                         val p1 = Offset(c.x + (innerR * cos(a)).toFloat(), c.y + (innerR * sin(a)).toFloat())
                         val p2 = Offset(c.x + (outerR * cos(a)).toFloat(), c.y + (outerR * sin(a)).toFloat())
-                        drawLine(gold.copy(alpha = 0.7f), p1, p2, strokeWidth = 1.1.dp.toPx(), cap = StrokeCap.Round)
+                        drawLine(gold.copy(alpha = 0.65f), p1, p2, strokeWidth = 1.dp.toPx(), cap = StrokeCap.Round)
                     }
-                    // Orbiting celestial node
                     drawCircle(
-                        color = cyan,
-                        radius = 2.8.dp.toPx(),
+                        color = Color(0xFFFFE066),
+                        radius = 2.4.dp.toPx(),
                         center = Offset(c.x + outerR, c.y)
                     )
                 }
             }
         }
 
-        // Inner Companion Avatar Core (reserved for future AI character portrait)
+        // Smooth Yellow Lava-Lamp Oil-Blob Cosmium Core inside the Astrolabe!
         Box(
             modifier = Modifier
-                .size(size * 0.64f)
-                .clip(CircleShape)
-                .background(
-                    if (palette.isEInk) palette.elevatedSurface
-                    else Color(0xFF141C2B)
-                )
-                .border(0.9.dp, Color(0x80D4AF37), CircleShape),
+                .size(size * 0.80f)
+                .clip(CircleShape),
             contentAlignment = Alignment.Center
         ) {
-            Icon(
-                imageVector = Icons.Default.AutoAwesome,
-                contentDescription = "Cosmos Companion Avatar Frame",
-                tint = if (palette.isEInk) palette.accentSaffron else Color(0xFFFFD166),
-                modifier = Modifier.size(size * 0.34f)
-            )
+            if (useLive3D && !palette.isEInk) {
+                com.example.ui.components.CosmiumNativeView(
+                    modifier = Modifier.fillMaxSize(),
+                    isActive = useLive3D,
+                    state = mood.stateKey,
+                    interactionIntensity = interactionIntensity,
+                    moodTurbulence = when (mood) {
+                        CosmiumMood.SPEAKING -> 0.55f
+                        CosmiumMood.THINKING -> 0.65f
+                        CosmiumMood.CELEBRATE -> 0.70f
+                        CosmiumMood.CURIOUS -> 0.40f
+                        CosmiumMood.ALERT -> 0.35f
+                        CosmiumMood.IDLE -> 0.15f
+                    },
+                    colorHex = mood.colorHex
+                )
+            } else {
+                CosmiumOrb(
+                    size = size * 0.80f,
+                    mood = mood,
+                    interactionIntensity = interactionIntensity,
+                    onTap = onTap
+                )
+            }
         }
     }
 }
 
 @Composable
-private fun CosmosHeaderCard(isThinking: Boolean) {
+private fun CosmosHeaderCard(
+    mood: CosmiumMood,
+    interactionIntensity: Float,
+    isCosmosActive: Boolean = true,
+    onAvatarTap: () -> Unit = {}
+) {
     val palette = LocalIndoPalette.current
     IndoToneSurface(
         modifier = Modifier
@@ -481,7 +600,13 @@ private fun CosmosHeaderCard(isThinking: Boolean) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            CelestialAstrolabeAvatar(size = 52.dp, isPulsingFast = isThinking)
+            CelestialAstrolabeAvatar(
+                size = 64.dp,
+                mood = mood,
+                interactionIntensity = interactionIntensity,
+                useLive3D = isCosmosActive,
+                onTap = onAvatarTap
+            )
 
             Column(modifier = Modifier.weight(1f)) {
                 Row(
@@ -494,21 +619,17 @@ private fun CosmosHeaderCard(isThinking: Boolean) {
                         fontWeight = FontWeight.ExtraBold,
                         color = MaterialTheme.colorScheme.onSurface
                     )
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = if (palette.isEInk) palette.elevatedSurface else palette.accentCyan.copy(alpha = 0.16f)
-                    ) {
-                        Text(
-                            text = if (isThinking) "THINKING" else "SANCTUARY",
-                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = palette.accentCyan
-                        )
-                    }
+                    CosmiumStatusPill(mood = mood)
                 }
                 Text(
-                    text = "Your Personal AI Study Sanctuary & Doubt Solver",
+                    text = when (mood) {
+                        CosmiumMood.SPEAKING -> "Cosmium is explaining your concepts..."
+                        CosmiumMood.THINKING -> "Cosmium is synthesizing an answer..."
+                        CosmiumMood.CURIOUS -> "Cosmium is listening to your question..."
+                        CosmiumMood.CELEBRATE -> "Cosmium is glowing with inspiration!"
+                        CosmiumMood.ALERT -> "Cosmium is ready whenever you retry."
+                        CosmiumMood.IDLE -> "Your Personal AI Study Sanctuary & Doubt Solver"
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -518,7 +639,11 @@ private fun CosmosHeaderCard(isThinking: Boolean) {
 }
 
 @Composable
-private fun CosmosWelcomeSanctuaryCard(greeting: String) {
+private fun CosmosWelcomeSanctuaryCard(
+    greeting: String,
+    mood: CosmiumMood,
+    interactionIntensity: Float
+) {
     val palette = LocalIndoPalette.current
     IndoToneSurface(
         modifier = Modifier.fillMaxWidth(),
@@ -531,9 +656,14 @@ private fun CosmosWelcomeSanctuaryCard(greeting: String) {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            CelestialAstrolabeAvatar(size = 66.dp)
+            CelestialAstrolabeAvatar(
+                size = 78.dp,
+                mood = mood,
+                interactionIntensity = interactionIntensity,
+                useLive3D = false
+            )
             Text(
-                text = "COSMOS COMPANION",
+                text = "COSMIUM COMPANION",
                 fontSize = 11.sp,
                 fontWeight = FontWeight.ExtraBold,
                 letterSpacing = 1.sp,
@@ -682,13 +812,12 @@ private fun CosmosThinkingIndicator() {
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(16.dp),
-                    strokeWidth = 2.dp,
-                    color = Color(0xFFE88D14)
+                CosmiumOrb(
+                    size = 24.dp,
+                    mood = CosmiumMood.THINKING
                 )
                 Text(
-                    text = "Cosmos Companion is weaving an explanation...",
+                    text = "Cosmium is weaving an explanation...",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

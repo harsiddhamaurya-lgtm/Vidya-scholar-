@@ -2,7 +2,7 @@
   "entities": {
     "UserProfile": {
       "title": "UserProfile",
-      "description": "Authenticated scholar profile storing private learning progress, onboarding completion, Vidya ID, and avatar customization.",
+      "description": "Authenticated scholar profile storing private learning progress, onboarding completion, Vidya ID, avatar customization, and RSA-OAEP public identity key.",
       "type": "object",
       "properties": {
         "uid": { "type": "string", "description": "Firebase Auth UID matching document ID" },
@@ -27,6 +27,8 @@
         "level": { "type": "string" },
         "hearts": { "type": "integer" },
         "completedLessons": { "type": "array" },
+        "publicKey": { "type": "string", "description": "Base64 X.509 RSA-2048 public key for E2EE key wrapping" },
+        "keyVersion": { "type": "integer", "description": "Monotonic identity public key version" },
         "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp" },
         "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp" }
       },
@@ -34,7 +36,7 @@
     },
     "VidyaIdentityCard": {
       "title": "VidyaIdentityCard",
-      "description": "Public non-PII scholar identity card keyed by handle_code for atomic Vidya ID reservation and peer lookup across Varta and Khel.",
+      "description": "Public non-PII scholar identity card keyed by handle_code for atomic Vidya ID reservation, peer lookup, and public key discovery across Varta and Khel.",
       "type": "object",
       "properties": {
         "uid": { "type": "string", "description": "Owner Firebase Auth UID" },
@@ -49,6 +51,8 @@
         "avatarFrameId": { "type": "string" },
         "avatarToneId": { "type": "string" },
         "focusRealm": { "type": "string" },
+        "publicKey": { "type": "string", "description": "Base64 X.509 RSA-2048 public key for E2EE thread and match key exchange" },
+        "keyVersion": { "type": "integer" },
         "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp" },
         "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp" }
       },
@@ -56,7 +60,7 @@
     },
     "Chat": {
       "title": "Chat",
-      "description": "Peer chat or study sabha thread scoped to participants.",
+      "description": "Peer chat or study sabha thread scoped to participants with per-participant wrapped AES-256-GCM DEKs.",
       "type": "object",
       "properties": {
         "createdBy": { "type": "string" },
@@ -64,12 +68,16 @@
         "name": { "type": "string" },
         "peerVidyaId": { "type": "string" },
         "lastMessage": { "type": "string" },
+        "lastMessageIv": { "type": "string" },
         "lastTimestamp": { "type": "integer" },
         "type": { "type": "string", "enum": ["individual", "group"] },
         "subjectTag": { "type": "string" },
         "unreadCount": { "type": "integer" },
         "isOnline": { "type": "boolean" },
         "timestampLabel": { "type": "string" },
+        "wrappedKeys": { "type": "object", "description": "Map of participant UID to RSA-OAEP wrapped AES-256-GCM thread key" },
+        "keyVersion": { "type": "integer" },
+        "isEncrypted": { "type": "boolean" },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
@@ -77,7 +85,7 @@
     },
     "Message": {
       "title": "Message",
-      "description": "Individual chat message with denormalized memberUids for rule-local evaluation.",
+      "description": "Individual chat message with denormalized memberUids and optional AES-256-GCM ciphertext payload.",
       "type": "object",
       "properties": {
         "senderId": { "type": "string" },
@@ -85,28 +93,81 @@
         "senderVidyaId": { "type": "string" },
         "memberUids": { "type": "array" },
         "text": { "type": "string" },
+        "ciphertext": { "type": "string" },
+        "iv": { "type": "string" },
+        "keyVersion": { "type": "integer" },
+        "isEncrypted": { "type": "boolean" },
         "timestamp": { "type": "integer" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["senderId", "memberUids", "text", "timestamp", "createdAt"]
+    },
+    "MatchmakingTicket": {
+      "title": "MatchmakingTicket",
+      "description": "Ranked online arena queue ticket supporting atomic peer claim and E2EE public key handoff.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "vidyaId": { "type": "string" },
+        "displayName": { "type": "string" },
+        "gameType": { "type": "string", "enum": ["SHATRANJ", "LUDO", "CHATURANGA"] },
+        "eloRating": { "type": "integer" },
+        "requiredPlayers": { "type": "integer" },
+        "publicKey": { "type": "string" },
+        "status": { "type": "string", "enum": ["searching", "matched", "cancelled"] },
+        "matchId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "vidyaId", "gameType", "eloRating", "requiredPlayers", "status", "createdAt", "updatedAt"]
+    },
+    "OnlineMatch": {
+      "title": "OnlineMatch",
+      "description": "Turn-locked encrypted multiplayer strategy match session for Shatranj, Pachisi, or Chaturanga.",
+      "type": "object",
+      "properties": {
+        "createdBy": { "type": "string" },
+        "participantUids": { "type": "array" },
+        "gameType": { "type": "string", "enum": ["SHATRANJ", "LUDO", "CHATURANGA"] },
+        "status": { "type": "string", "enum": ["waiting", "active", "completed"] },
+        "currentTurnUid": { "type": "string" },
+        "moveSeq": { "type": "integer" },
+        "wrappedKeys": { "type": "object" },
+        "keyVersion": { "type": "integer" },
+        "encryptedState": { "type": "string" },
+        "stateIv": { "type": "string" },
+        "stateDigest": { "type": "string" },
+        "winnerUid": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["createdBy", "participantUids", "gameType", "status", "currentTurnUid", "moveSeq", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
     "/users/{userId}": {
       "schema": { "$ref": "#/entities/UserProfile" },
-      "description": "Owner-only scholar profile and learning progress."
+      "description": "Owner-only scholar profile, learning progress, and identity public key."
     },
     "/vidyaIds/{vidyaKey}": {
       "schema": { "$ref": "#/entities/VidyaIdentityCard" },
-      "description": "Unique handle_code reservation and shareable non-PII scholar identity card."
+      "description": "Unique handle_code reservation and shareable non-PII scholar identity card with public key."
     },
     "/chats/{chatId}": {
       "schema": { "$ref": "#/entities/Chat" },
-      "description": "Varta peer conversations and study sabha discussion rooms."
+      "description": "Varta peer conversations and study sabha discussion rooms with E2EE wrappedKeys."
     },
     "/chats/{chatId}/messages/{messageId}": {
       "schema": { "$ref": "#/entities/Message" },
-      "description": "Messages inside a Varta chat or study room."
+      "description": "E2EE encrypted messages inside a Varta chat or study room."
+    },
+    "/matchmakingTickets/{ticketId}": {
+      "schema": { "$ref": "#/entities/MatchmakingTicket" },
+      "description": "Ranked Khel matchmaking queue tickets."
+    },
+    "/onlineMatches/{matchId}": {
+      "schema": { "$ref": "#/entities/OnlineMatch" },
+      "description": "Encrypted turn-based multiplayer match state rooms."
     }
   }
 }

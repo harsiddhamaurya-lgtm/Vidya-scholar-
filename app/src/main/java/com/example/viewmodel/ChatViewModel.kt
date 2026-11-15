@@ -9,6 +9,9 @@ import com.example.data.PracticePeersCatalog
 import com.example.data.UserProfile
 import com.example.data.VidyaIdentityCard
 import com.example.data.handleFirestoreError
+import com.example.data.repository.ScholarIdentityRepository
+import com.example.data.repository.VidyaIdFormatter
+import com.example.security.KeystoreCryptoManager
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -16,6 +19,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import java.util.concurrent.ConcurrentHashMap
+import javax.crypto.SecretKey
 
 data class LiveStudySabha(
     val id: String,
@@ -203,6 +208,9 @@ class ChatViewModel(private val db: FirebaseFirestore) : ViewModel() {
     private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
     val messages: StateFlow<List<ChatMessage>> = _messages.asStateFlow()
 
+    // In-memory cache of unwrapped AES-256 thread session DEKs: key = "${chatId}:${keyVersion}"
+    private val sessionKeyCache = ConcurrentHashMap<String, SecretKey>()
+
     private var activeLoadedUserId: String? = null
     private var chatsListener: com.google.firebase.firestore.ListenerRegistration? = null
     private var messagesListener: com.google.firebase.firestore.ListenerRegistration? = null
@@ -210,6 +218,8 @@ class ChatViewModel(private val db: FirebaseFirestore) : ViewModel() {
     fun loadChats(userId: String) {
         if (userId.isBlank() || userId.startsWith("demo_") || userId == activeLoadedUserId) return
         activeLoadedUserId = userId
+        KeystoreCryptoManager.ensureIdentityKeyPair(userId)
+
         chatsListener?.remove()
         chatsListener = db.collection("chats")
             .whereArrayContains("participants", userId)
@@ -219,14 +229,40 @@ class ChatViewModel(private val db: FirebaseFirestore) : ViewModel() {
                     return@addSnapshotListener
                 }
                 val remote = snapshot?.documents?.mapNotNull { doc ->
-                    doc.toObject(Chat::class.java)?.copy(id = doc.id)
+                    val rawChat = doc.toObject(Chat::class.java)?.copy(id = doc.id) ?: return@mapNotNull null
+                    decryptChatSummary(rawChat, userId)
                 }.orEmpty()
+
                 if (remote.isNotEmpty()) {
                     val merged = (remote + _chats.value.filter { local -> remote.none { it.id == local.id } })
                         .sortedByDescending { it.lastTimestamp }
                     _chats.value = merged
                 }
             }
+    }
+
+    private fun decryptChatSummary(chat: Chat, uid: String): Chat {
+        val sessionKey = resolveChatSessionKey(chat, uid)
+        if (!chat.isEncrypted || chat.lastMessageIv.isBlank()) {
+            return chat
+        }
+        val plainPreview = if (sessionKey != null) {
+            KeystoreCryptoManager.decryptWithSessionKey(chat.lastMessage, chat.lastMessageIv, sessionKey)
+                ?: "[Encrypted message]"
+        } else {
+            "[Encrypted message]"
+        }
+        return chat.copy(lastMessage = plainPreview)
+    }
+
+    private fun resolveChatSessionKey(chat: Chat, uid: String): SecretKey? {
+        val cacheKey = "${chat.id}:${chat.keyVersion}"
+        sessionKeyCache[cacheKey]?.let { return it }
+
+        val wrappedForMe = chat.wrappedKeys[uid] ?: return null
+        val unwrapped = KeystoreCryptoManager.unwrapSessionKey(uid, wrappedForMe) ?: return null
+        sessionKeyCache[cacheKey] = unwrapped
+        return unwrapped
     }
 
     fun markChatAsRead(chatId: String) {
@@ -268,19 +304,23 @@ class ChatViewModel(private val db: FirebaseFirestore) : ViewModel() {
             timestampLabel = "Just now"
         )
         _chats.value = listOf(newChat) + _chats.value
-        localMessagesMap[newId] = mutableListOf(
-            ChatMessage(
-                senderId = currentUid,
-                senderName = currentProfile?.name ?: "Scholar",
-                senderVidyaId = currentProfile?.effectiveVidyaId() ?: "",
-                memberUids = participants,
-                text = openingMsg,
-                isUser = true,
-                timestamp = now
-            )
+        val openingChatMessage = ChatMessage(
+            senderId = currentUid,
+            senderName = currentProfile?.name ?: "Scholar",
+            senderVidyaId = currentProfile?.effectiveVidyaId() ?: "",
+            memberUids = participants,
+            text = openingMsg,
+            isUser = true,
+            timestamp = now
         )
+        localMessagesMap[newId] = mutableListOf(openingChatMessage)
 
-        persistChatToFirestore(currentUid, newChat)
+        persistEncryptedChatToFirestore(
+            uid = currentUid,
+            chat = newChat,
+            openingMessage = openingChatMessage,
+            peerPublicKeyHint = peerCard.publicKey
+        )
         return newId
     }
 
@@ -315,17 +355,16 @@ class ChatViewModel(private val db: FirebaseFirestore) : ViewModel() {
             timestampLabel = "Just now"
         )
         _chats.value = listOf(newChat) + _chats.value
-        localMessagesMap[newId] = mutableListOf(
-            ChatMessage(
-                senderId = effectiveUid,
-                senderName = currentProfile?.name ?: "Scholar",
-                senderVidyaId = currentProfile?.effectiveVidyaId().orEmpty(),
-                memberUids = listOf(effectiveUid),
-                text = openingMsg,
-                isUser = true,
-                timestamp = now
-            )
+        val openingChatMessage = ChatMessage(
+            senderId = effectiveUid,
+            senderName = currentProfile?.name ?: "Scholar",
+            senderVidyaId = currentProfile?.effectiveVidyaId().orEmpty(),
+            memberUids = listOf(effectiveUid),
+            text = openingMsg,
+            isUser = true,
+            timestamp = now
         )
+        localMessagesMap[newId] = mutableListOf(openingChatMessage)
 
         if (isGroupRoom) {
             _liveSabhas.value = listOf(
@@ -340,30 +379,94 @@ class ChatViewModel(private val db: FirebaseFirestore) : ViewModel() {
             ) + _liveSabhas.value
         }
 
-        persistChatToFirestore(effectiveUid, newChat)
+        persistEncryptedChatToFirestore(
+            uid = effectiveUid,
+            chat = newChat,
+            openingMessage = openingChatMessage
+        )
         return newId
     }
 
-    private fun persistChatToFirestore(uid: String, chat: Chat) {
+    private fun persistEncryptedChatToFirestore(
+        uid: String,
+        chat: Chat,
+        openingMessage: ChatMessage,
+        peerPublicKeyHint: String = ""
+    ) {
         if (uid.isBlank() || uid.startsWith("demo_")) return
         viewModelScope.launch {
             try {
-                val payload = mapOf(
+                val myPubKey = KeystoreCryptoManager.ensureIdentityKeyPair(uid)
+                val sessionKey = KeystoreCryptoManager.generateSessionAesKey()
+                sessionKeyCache["${chat.id}:1"] = sessionKey
+
+                val wrappedKeys = mutableMapOf<String, String>()
+                if (myPubKey.isNotBlank()) {
+                    val wrappedSelf = KeystoreCryptoManager.wrapSessionKey(sessionKey, myPubKey)
+                    if (wrappedSelf.isNotBlank()) wrappedKeys[uid] = wrappedSelf
+                }
+
+                // Resolve peer public key from hint or Vidya registry if missing
+                val peerUid = chat.participants.firstOrNull { it != uid }
+                var resolvedPeerPub = peerPublicKeyHint
+                if (resolvedPeerPub.isBlank() && peerUid != null && chat.peerVidyaId.contains("#")) {
+                    val parsed = VidyaIdFormatter.parseVidyaId(chat.peerVidyaId)
+                    if (parsed != null) {
+                        val keyDoc = VidyaIdFormatter.toDocumentKey(parsed.first, parsed.second)
+                        resolvedPeerPub = runCatching {
+                            db.collection(ScholarIdentityRepository.COLLECTION_VIDYA_IDS)
+                                .document(keyDoc)
+                                .get()
+                                .await()
+                                .getString("publicKey")
+                                .orEmpty()
+                        }.getOrDefault("")
+                    }
+                }
+                if (peerUid != null && resolvedPeerPub.isNotBlank()) {
+                    val wrappedPeer = KeystoreCryptoManager.wrapSessionKey(sessionKey, resolvedPeerPub)
+                    if (wrappedPeer.isNotBlank()) wrappedKeys[peerUid] = wrappedPeer
+                }
+
+                val (encPreview, previewIv) = KeystoreCryptoManager.encryptWithSessionKey(chat.lastMessage, sessionKey)
+                val chatPayload = mapOf(
                     "createdBy" to chat.createdBy,
                     "participants" to chat.participants,
                     "name" to (chat.name ?: "Varta Thread"),
                     "peerVidyaId" to chat.peerVidyaId,
-                    "lastMessage" to chat.lastMessage,
+                    "lastMessage" to encPreview,
+                    "lastMessageIv" to previewIv,
                     "lastTimestamp" to chat.lastTimestamp,
                     "type" to chat.type,
                     "subjectTag" to chat.subjectTag,
                     "unreadCount" to chat.unreadCount,
                     "isOnline" to chat.isOnline,
                     "timestampLabel" to chat.timestampLabel,
+                    "wrappedKeys" to wrappedKeys,
+                    "keyVersion" to 1,
+                    "isEncrypted" to true,
                     "createdAt" to FieldValue.serverTimestamp(),
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
-                db.collection("chats").document(chat.id).set(payload).await()
+                db.collection("chats").document(chat.id).set(chatPayload).await()
+
+                val (msgCipher, msgIv) = KeystoreCryptoManager.encryptWithSessionKey(openingMessage.text, sessionKey)
+                val msgPayload = mapOf(
+                    "senderId" to uid,
+                    "senderName" to openingMessage.senderName.take(60),
+                    "senderVidyaId" to openingMessage.senderVidyaId.take(24),
+                    "memberUids" to chat.participants,
+                    "text" to "[Encrypted]",
+                    "ciphertext" to msgCipher,
+                    "iv" to msgIv,
+                    "keyVersion" to 1,
+                    "isEncrypted" to true,
+                    "timestamp" to openingMessage.timestamp,
+                    "createdAt" to FieldValue.serverTimestamp()
+                )
+                db.collection("chats").document(chat.id)
+                    .collection("messages").document(openingMessage.id)
+                    .set(msgPayload).await()
             } catch (e: Exception) {
                 handleFirestoreError(e, OperationType.CREATE, "chats/${chat.id}")
             }
@@ -375,6 +478,8 @@ class ChatViewModel(private val db: FirebaseFirestore) : ViewModel() {
         _messages.value = localMessagesMap[chatId]?.toList() ?: emptyList()
 
         if (currentUserId.isBlank() || currentUserId.startsWith("demo_")) return
+        KeystoreCryptoManager.ensureIdentityKeyPair(currentUserId)
+
         messagesListener?.remove()
         messagesListener = db.collection("chats").document(chatId).collection("messages")
             .whereArrayContains("memberUids", currentUserId)
@@ -383,13 +488,49 @@ class ChatViewModel(private val db: FirebaseFirestore) : ViewModel() {
                     handleFirestoreError(error, OperationType.LIST, "chats/$chatId/messages")
                     return@addSnapshotListener
                 }
-                val remote = snapshot?.documents?.mapNotNull { doc ->
-                    doc.toObject(ChatMessage::class.java)?.copy(id = doc.id)
-                }?.sortedBy { it.timestamp }.orEmpty()
-                if (remote.isNotEmpty()) {
-                    _messages.value = remote
+                val rawDocs = snapshot?.documents.orEmpty()
+                if (rawDocs.isEmpty()) return@addSnapshotListener
+
+                viewModelScope.launch {
+                    val chat = ensureChatSessionKeyLoaded(chatId, currentUserId)
+                    val remote = rawDocs.mapNotNull { doc ->
+                        val msg = doc.toObject(ChatMessage::class.java)?.copy(id = doc.id)
+                            ?: return@mapNotNull null
+                        val isMe = msg.senderId == currentUserId
+                        if (msg.isEncrypted && msg.ciphertext.isNotBlank() && msg.iv.isNotBlank()) {
+                            val key = sessionKeyCache["$chatId:${msg.keyVersion}"]
+                                ?: chat?.let { resolveChatSessionKey(it, currentUserId) }
+                            val decrypted = if (key != null) {
+                                KeystoreCryptoManager.decryptWithSessionKey(msg.ciphertext, msg.iv, key)
+                            } else {
+                                null
+                            }
+                            msg.copy(text = decrypted ?: "[Encrypted message]", isUser = isMe)
+                        } else {
+                            msg.copy(isUser = isMe)
+                        }
+                    }.sortedBy { it.timestamp }
+
+                    if (remote.isNotEmpty()) {
+                        _messages.value = remote
+                    }
                 }
             }
+    }
+
+    private suspend fun ensureChatSessionKeyLoaded(chatId: String, uid: String): Chat? {
+        val cachedChat = getChatById(chatId)
+        if (cachedChat != null && sessionKeyCache.containsKey("$chatId:${cachedChat.keyVersion}")) {
+            return cachedChat
+        }
+        return try {
+            val snap = db.collection("chats").document(chatId).get().await()
+            val remoteChat = snap.toObject(Chat::class.java)?.copy(id = snap.id) ?: return cachedChat
+            resolveChatSessionKey(remoteChat, uid)
+            remoteChat
+        } catch (_: Exception) {
+            cachedChat
+        }
     }
 
     fun sendMessage(
@@ -403,7 +544,8 @@ class ChatViewModel(private val db: FirebaseFirestore) : ViewModel() {
         if (trimmed.isEmpty()) return
 
         val effectiveSender = senderId.ifBlank { "demo_student_123" }
-        val participants = getChatById(chatId)?.participants?.ifEmpty { listOf(effectiveSender) }
+        val chatObj = getChatById(chatId)
+        val participants = chatObj?.participants?.ifEmpty { listOf(effectiveSender) }
             ?: listOf(effectiveSender)
         val now = System.currentTimeMillis()
         val message = ChatMessage(
@@ -435,27 +577,61 @@ class ChatViewModel(private val db: FirebaseFirestore) : ViewModel() {
             viewModelScope.launch {
                 val msgPath = "chats/$chatId/messages/${message.id}"
                 try {
+                    val remoteChat = ensureChatSessionKeyLoaded(chatId, effectiveSender)
+                    var keyVersion = remoteChat?.keyVersion ?: 1
+                    var sessionKey = sessionKeyCache["$chatId:$keyVersion"]
+                        ?: remoteChat?.let { resolveChatSessionKey(it, effectiveSender) }
+
+                    var newWrappedKeys: Map<String, String>? = null
+                    if (sessionKey == null) {
+                        sessionKey = KeystoreCryptoManager.generateSessionAesKey()
+                        keyVersion = (remoteChat?.keyVersion ?: 0).coerceAtLeast(1)
+                        sessionKeyCache["$chatId:$keyVersion"] = sessionKey
+                        val myPub = KeystoreCryptoManager.ensureIdentityKeyPair(effectiveSender)
+                        if (myPub.isNotBlank()) {
+                            val wrappedSelf = KeystoreCryptoManager.wrapSessionKey(sessionKey, myPub)
+                            if (wrappedSelf.isNotBlank()) {
+                                val merged = remoteChat?.wrappedKeys.orEmpty().toMutableMap()
+                                merged[effectiveSender] = wrappedSelf
+                                newWrappedKeys = merged
+                            }
+                        }
+                    }
+
+                    val (msgCipher, msgIv) = KeystoreCryptoManager.encryptWithSessionKey(trimmed.take(2000), sessionKey)
+                    val (previewCipher, previewIv) = KeystoreCryptoManager.encryptWithSessionKey(trimmed.take(1000), sessionKey)
+
                     val msgPayload = mapOf(
                         "senderId" to effectiveSender,
                         "senderName" to senderName.take(60),
                         "senderVidyaId" to senderVidyaId.take(24),
                         "memberUids" to participants,
-                        "text" to trimmed.take(2000),
+                        "text" to "[Encrypted]",
+                        "ciphertext" to msgCipher,
+                        "iv" to msgIv,
+                        "keyVersion" to keyVersion,
+                        "isEncrypted" to true,
                         "timestamp" to now,
                         "createdAt" to FieldValue.serverTimestamp()
                     )
                     db.collection("chats").document(chatId)
                         .collection("messages").document(message.id)
                         .set(msgPayload).await()
+
+                    val chatUpdate = mutableMapOf<String, Any>(
+                        "lastMessage" to previewCipher,
+                        "lastMessageIv" to previewIv,
+                        "keyVersion" to keyVersion,
+                        "isEncrypted" to true,
+                        "lastTimestamp" to now,
+                        "timestampLabel" to "Just now",
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                    if (newWrappedKeys != null) {
+                        chatUpdate["wrappedKeys"] = newWrappedKeys
+                    }
                     db.collection("chats").document(chatId)
-                        .update(
-                            mapOf(
-                                "lastMessage" to trimmed.take(1000),
-                                "lastTimestamp" to now,
-                                "timestampLabel" to "Just now",
-                                "updatedAt" to FieldValue.serverTimestamp()
-                            )
-                        ).await()
+                        .update(chatUpdate).await()
                 } catch (e: Exception) {
                     handleFirestoreError(e, OperationType.WRITE, msgPath)
                 }

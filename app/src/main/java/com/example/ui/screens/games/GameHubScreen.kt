@@ -27,11 +27,17 @@ import androidx.compose.ui.unit.sp
 import com.example.data.AvatarSpec
 import com.example.data.UserProfile
 import com.example.data.local.GameStatsEntity
+import com.example.games.chaturanga.ChaturangaState
+import com.example.games.chess.ChessGameState
 import com.example.games.config.GameSessionConfig
 import com.example.games.config.PlayMode
 import com.example.games.config.PlayerSetup
 import com.example.games.config.RankBadgeSystem
+import com.example.games.ludo.LudoColor
+import com.example.games.ludo.LudoGameState
 import com.example.games.matchmaking.MatchmakingEngine
+import com.example.games.matchmaking.MatchmakingQueueResult
+import com.example.games.matchmaking.OnlineMatchRepository
 import com.example.ui.components.ScholarAvatarBadge
 import com.example.ui.components.VidyaIdChip
 import com.example.ui.theme.IndoAtmosphericBackdrop
@@ -40,8 +46,12 @@ import com.example.ui.theme.LocalIndoPalette
 import com.example.utils.SoundHelper
 import com.example.viewmodel.GameType
 import com.example.viewmodel.GamesViewModel
+import com.google.firebase.Firebase
+import com.google.firebase.auth.auth
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -89,9 +99,22 @@ fun GameHubScreen(
     }
 
     var isMatchmaking by remember { mutableStateOf(false) }
-    var matchmakingSecondsLeft by remember { mutableStateOf(60) }
+    var matchmakingSecondsLeft by remember { mutableStateOf(45) }
     var matchedOpponentName by remember { mutableStateOf<String?>(null) }
     var matchedOpponentElo by remember { mutableStateOf(1200) }
+    var activeTicketId by remember { mutableStateOf<String?>(null) }
+    val onlineMatchRepo = remember(context) { OnlineMatchRepository(context) }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            val pendingTicket = activeTicketId
+            if (!pendingTicket.isNullOrBlank()) {
+                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                    onlineMatchRepo.cancelTicket(pendingTicket)
+                }
+            }
+        }
+    }
 
     val rankTier = stats.rankTier
     val elo = stats.eloRating
@@ -628,28 +651,93 @@ fun GameHubScreen(
                             SoundHelper.playFolderOpen(context)
                             if (selectedMode == PlayMode.ONLINE_RANKED) {
                                 isMatchmaking = true
-                                matchmakingSecondsLeft = 60
+                                matchmakingSecondsLeft = 45
                                 matchedOpponentName = null
+                                activeTicketId = null
                                 coroutineScope.launch {
-                                    var elapsed = 0
+                                    val authUid = runCatching { Firebase.auth.currentUser?.uid }.getOrNull().orEmpty()
+                                    val initialBoardSerialized = when (gameType) {
+                                        GameType.SHATRANJ -> ChessGameState.initialBoard().serialize()
+                                        GameType.LUDO -> LudoGameState.initialGame(listOf(LudoColor.RED, LudoColor.YELLOW)).serialize()
+                                        GameType.CHATURANGA -> ChaturangaState.initialBoard().serialize()
+                                    }
+
+                                    var liveMatchId = ""
+                                    var localIndex = 0
                                     var foundOpponent = false
-                                    while (elapsed < 60 && isMatchmaking) {
-                                        delay(1000)
-                                        elapsed++
-                                        matchmakingSecondsLeft = (60 - elapsed).coerceAtLeast(0)
-                                        if (elapsed >= 3 && Math.random() < 0.35) {
-                                            foundOpponent = true
-                                            break
+                                    var opponentLabel = "Vidyut AI (vidyut#1001)"
+                                    var opponentElo = elo
+
+                                    if (authUid.isNotBlank() && !authUid.startsWith("demo_")) {
+                                        val queueResult = onlineMatchRepo.findOrQueueMatch(
+                                            uid = authUid,
+                                            vidyaId = playerVidyaId,
+                                            displayName = playerOneName,
+                                            gameType = gameType,
+                                            eloRating = elo,
+                                            requiredPlayers = if (gameType == GameType.SHATRANJ) 2 else playerCount,
+                                            initialSerializedState = initialBoardSerialized
+                                        )
+
+                                        when (queueResult) {
+                                            is MatchmakingQueueResult.Matched -> {
+                                                foundOpponent = true
+                                                liveMatchId = queueResult.matchId
+                                                localIndex = queueResult.localPlayerIndex
+                                                opponentLabel = "${queueResult.opponentName} (${queueResult.opponentVidyaId})"
+                                                opponentElo = queueResult.opponentElo
+                                            }
+                                            is MatchmakingQueueResult.WaitingOnTicket -> {
+                                                activeTicketId = queueResult.ticketId
+                                                val countdownJob = launch {
+                                                    for (sec in 44 downTo 0) {
+                                                        if (!isMatchmaking) break
+                                                        delay(1000)
+                                                        matchmakingSecondsLeft = sec
+                                                    }
+                                                }
+                                                val matchedResult = onlineMatchRepo.awaitLiveMatch(
+                                                    myTicketId = queueResult.ticketId,
+                                                    uid = authUid,
+                                                    gameType = gameType,
+                                                    eloRating = elo,
+                                                    initialSerializedState = initialBoardSerialized,
+                                                    timeoutMs = OnlineMatchRepository.DEFAULT_QUEUE_TIMEOUT_MS
+                                                )
+                                                countdownJob.cancel()
+                                                if (!isMatchmaking) {
+                                                    onlineMatchRepo.cancelTicket(queueResult.ticketId)
+                                                    activeTicketId = null
+                                                    return@launch
+                                                }
+                                                if (matchedResult != null) {
+                                                    foundOpponent = true
+                                                    liveMatchId = matchedResult.matchId
+                                                    localIndex = matchedResult.localPlayerIndex
+                                                    opponentLabel = "${matchedResult.opponentName} (${matchedResult.opponentVidyaId})"
+                                                    opponentElo = matchedResult.opponentElo
+                                                } else {
+                                                    onlineMatchRepo.cancelTicket(queueResult.ticketId)
+                                                }
+                                                activeTicketId = null
+                                            }
+                                            MatchmakingQueueResult.FallbackToBot -> {
+                                                delay(1200)
+                                            }
+                                        }
+                                    } else {
+                                        // Unauthenticated / offline preview waits briefly then falls back cleanly to Vidyut AI
+                                        for (sec in 3 downTo 0) {
+                                            if (!isMatchmaking) return@launch
+                                            matchmakingSecondsLeft = sec
+                                            delay(650)
                                         }
                                     }
-                                    if (!isMatchmaking) return@launch
 
-                                    val opponentCard = MatchmakingEngine.pickPracticeOpponent(gameType, userProfile?.uid.orEmpty())
-                                    val opponentLabel = if (foundOpponent) "${opponentCard.displayName} (${opponentCard.vidyaId})" else "Vidyut AI (vidyut#1001)"
-                                    val opponentElo = if (foundOpponent) (elo - 30..elo + 40).random() else elo
+                                    if (!isMatchmaking) return@launch
                                     matchedOpponentName = opponentLabel
                                     matchedOpponentElo = opponentElo
-                                    delay(500)
+                                    delay(450)
                                     isMatchmaking = false
 
                                     val updatedPlayers = players.mapIndexed { i, p ->
@@ -663,7 +751,10 @@ fun GameHubScreen(
                                             playerCount = playerCount,
                                             players = updatedPlayers,
                                             difficulty = selectedDifficulty,
-                                            timeControlMinutes = selectedTimeControl
+                                            timeControlMinutes = selectedTimeControl,
+                                            onlineMatchId = liveMatchId,
+                                            localParticipantUid = authUid,
+                                            localPlayerIndex = localIndex
                                         )
                                     )
                                 }
@@ -742,9 +833,25 @@ fun GameHubScreen(
 
     if (isMatchmaking) {
         AlertDialog(
-            onDismissRequest = { isMatchmaking = false },
+            onDismissRequest = {
+                isMatchmaking = false
+                val pending = activeTicketId
+                activeTicketId = null
+                if (!pending.isNullOrBlank()) {
+                    coroutineScope.launch { onlineMatchRepo.cancelTicket(pending) }
+                }
+            },
             confirmButton = {
-                TextButton(onClick = { isMatchmaking = false }) {
+                TextButton(
+                    onClick = {
+                        isMatchmaking = false
+                        val pending = activeTicketId
+                        activeTicketId = null
+                        if (!pending.isNullOrBlank()) {
+                            coroutineScope.launch { onlineMatchRepo.cancelTicket(pending) }
+                        }
+                    }
+                ) {
                     Text("Cancel", color = accentColor)
                 }
             },

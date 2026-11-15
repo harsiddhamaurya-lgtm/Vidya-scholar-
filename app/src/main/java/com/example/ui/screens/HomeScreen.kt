@@ -1,15 +1,8 @@
 package com.example.ui.screens
 
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.CubicBezierEasing
-import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.LocalIndication
@@ -54,13 +47,13 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -87,10 +80,8 @@ import com.example.ui.components.VidyaIdChip
 import com.example.ui.theme.IndoAtmosphericBackdrop
 import com.example.ui.theme.IndoToneSurface
 import com.example.ui.theme.LocalIndoPalette
-import com.example.utils.IndoMotion
 import com.example.utils.SoundHelper
 import com.example.viewmodel.VidyaVaultViewModel
-import kotlinx.coroutines.delay
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
@@ -132,136 +123,99 @@ fun HomeScreen(
         ) {
             // 1. THE WARRIOR STATUS HEADER (TOP PROFILE BAR)
             item {
-                StaggeredHomeSection(index = 0) {
-                    WarriorStatusHeader(
-                        userProfile = userProfile,
-                        completedQuestCount = completedIds.size,
-                        onOpenProfile = {
-                            SoundHelper.playClick(context)
-                            onNavigateToProfile()
-                        }
-                    )
-                }
+                WarriorStatusHeader(
+                    userProfile = userProfile,
+                    completedQuestCount = completedIds.size,
+                    onOpenProfile = {
+                        SoundHelper.playClick(context)
+                        onNavigateToProfile()
+                    }
+                )
             }
 
             // 2. THE SHAKTI AI MENTOR BANNER ("THE ORACLE PORTAL")
             item {
-                StaggeredHomeSection(index = 1) {
-                    OraclePortalHeroBanner(
-                        onAskGuru = {
-                            SoundHelper.playWoodyTock(context)
-                            onNavigateToAiTutor()
-                        }
-                    )
-                }
+                OraclePortalHeroBanner(
+                    onAskGuru = {
+                        SoundHelper.playWoodyTock(context)
+                        onNavigateToAiTutor()
+                    }
+                )
             }
 
             // 3. QUICK-PORTAL ACTION CARDS (VARTA & AI COACH BENTO GRID)
             item {
-                StaggeredHomeSection(index = 2) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        VartaQuickPortalCard(
-                            modifier = Modifier.weight(1f),
-                            onClick = {
-                                SoundHelper.playWoodyTock(context)
-                                onNavigateToCommunity()
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    VartaQuickPortalCard(
+                        modifier = Modifier.weight(1f),
+                        onClick = {
+                            SoundHelper.playWoodyTock(context)
+                            onNavigateToCommunity()
+                        }
+                    )
+                    AiCoachQuickPortalCard(
+                        modifier = Modifier.weight(1f),
+                        challengeTitle = "Why d/dx(e^x) = e^x?",
+                        onClick = {
+                            SoundHelper.playTempleChime(context)
+                            if (onLaunchDailyChallenge != null) {
+                                onLaunchDailyChallenge(dailyChallengePrompt)
+                            } else {
+                                onNavigateToAiTutor()
                             }
-                        )
-                        AiCoachQuickPortalCard(
-                            modifier = Modifier.weight(1f),
-                            challengeTitle = "Why d/dx(e^x) = e^x?",
-                            onClick = {
-                                SoundHelper.playTempleChime(context)
-                                if (onLaunchDailyChallenge != null) {
-                                    onLaunchDailyChallenge(dailyChallengePrompt)
-                                } else {
-                                    onNavigateToAiTutor()
-                                }
-                            }
-                        )
-                    }
+                        }
+                    )
                 }
             }
 
             // 4. "CONTINUE LEARNING" QUEST RESUME MODULE HEADER
             item {
-                StaggeredHomeSection(index = 3) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 2.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column {
-                            Text(
-                                text = "Continue Quest • Vidya",
-                                style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = MaterialTheme.colorScheme.onBackground
-                            )
-                            Text(
-                                text = "Teleport straight into your active chapter milestone",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 2.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            text = "Continue Quest • Vidya",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = MaterialTheme.colorScheme.onBackground
+                        )
+                        Text(
+                            text = "Teleport straight into your active chapter milestone",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
             }
 
             // MINI-QUEST PROGRESS CARDS WITH MILESTONE PATH + DIRECT RESUME TRIGGER
-            itemsIndexed(resumeRealms, key = { _, pair -> pair.first.realmId.name }) { idx, (realm, activeLevel) ->
-                StaggeredHomeSection(index = 4 + idx) {
-                    QuestResumeCampaignCard(
-                        realm = realm,
-                        activeLevel = activeLevel,
-                        completedIds = completedIds,
-                        vidyaViewModel = vidyaViewModel,
-                        onResume = {
-                            SoundHelper.playTempleChime(context)
-                            if (onResumeQuestLevel != null) {
-                                onResumeQuestLevel(realm.realmId, activeLevel)
-                            } else {
-                                onNavigateToCourse(realm.realmId.courseId)
-                            }
+            itemsIndexed(resumeRealms, key = { _, pair -> pair.first.realmId.name }) { _, (realm, activeLevel) ->
+                QuestResumeCampaignCard(
+                    realm = realm,
+                    activeLevel = activeLevel,
+                    completedIds = completedIds,
+                    vidyaViewModel = vidyaViewModel,
+                    onResume = {
+                        SoundHelper.playTempleChime(context)
+                        if (onResumeQuestLevel != null) {
+                            onResumeQuestLevel(realm.realmId, activeLevel)
+                        } else {
+                            onNavigateToCourse(realm.realmId.courseId)
                         }
-                    )
-                }
+                    }
+                )
             }
 
             item { Spacer(modifier = Modifier.height(6.dp)) }
         }
-    }
-}
-
-@Composable
-private fun StaggeredHomeSection(
-    index: Int,
-    content: @Composable () -> Unit
-) {
-    val alphaAnim = remember { Animatable(0f) }
-    val slideAnim = remember { Animatable(22f) }
-
-    LaunchedEffect(Unit) {
-        delay((index * 55L).coerceAtMost(300L))
-        alphaAnim.animateTo(1f, tween(240, easing = IndoMotion.OrganicDeceleration))
-    }
-    LaunchedEffect(Unit) {
-        delay((index * 55L).coerceAtMost(300L))
-        slideAnim.animateTo(0f, tween(260, easing = IndoMotion.OrganicDeceleration))
-    }
-
-    Box(
-        modifier = Modifier.graphicsLayer {
-            alpha = alphaAnim.value
-            translationY = slideAnim.value
-        }
-    ) {
-        content()
     }
 }
 
@@ -280,17 +234,6 @@ private fun WarriorStatusHeader(
         xp >= 1200 -> "Level $rankLevel Architect Initiate"
         else -> "Level $rankLevel Vidya Seeker"
     }
-
-    val infiniteTransition = rememberInfiniteTransition(label = "warrior_hud")
-    val flameScale by infiniteTransition.animateFloat(
-        initialValue = 0.94f,
-        targetValue = 1.12f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(900, easing = CubicBezierEasing(0.16f, 1f, 0.3f, 1f)),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "flame_pulse"
-    )
 
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -312,7 +255,7 @@ private fun WarriorStatusHeader(
                 avatarSpec = userProfile?.toAvatarSpec() ?: com.example.data.AvatarSpec(),
                 displayName = userProfile?.name ?: "Scholar",
                 size = 56.dp,
-                animateRing = true
+                animateRing = false
             )
 
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -372,14 +315,7 @@ private fun WarriorStatusHeader(
                         imageVector = Icons.Default.LocalFireDepartment,
                         contentDescription = "Streak",
                         tint = if (palette.isEInk) palette.accentSaffron else Color(0xFFE88D14),
-                        modifier = Modifier
-                            .size(17.dp)
-                            .graphicsLayer {
-                                if (!palette.isEInk) {
-                                    scaleX = flameScale
-                                    scaleY = flameScale
-                                }
-                            }
+                        modifier = Modifier.size(17.dp)
                     )
                     Text(
                         text = "${streak}d",
@@ -423,17 +359,6 @@ private fun OraclePortalHeroBanner(
     onAskGuru: () -> Unit
 ) {
     val palette = LocalIndoPalette.current
-    val infiniteTransition = rememberInfiniteTransition(label = "oracle_pulse")
-    val energyAlpha by infiniteTransition.animateFloat(
-        initialValue = 0.45f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(950, easing = CubicBezierEasing(0.16f, 1f, 0.3f, 1f)),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "oracle_energy"
-    )
-
     val bannerBg = when {
         palette.isEInk -> Brush.verticalGradient(listOf(palette.cardSurface, palette.cardSurface))
         palette.isDark -> Brush.linearGradient(listOf(Color(0xFF171E30), Color(0xFF13222A)))
@@ -456,32 +381,39 @@ private fun OraclePortalHeroBanner(
                 .fillMaxWidth()
                 .background(bannerBg)
         ) {
-            // Subtle Glowing Sri Yantra Sacred Geometry Watermark in Corner
+            // Subtle Glowing Sri Yantra Sacred Geometry Watermark in Corner (cached per layout)
             if (!palette.isEInk) {
-                Canvas(modifier = Modifier.matchParentSize()) {
-                    val c = Offset(size.width * 0.87f, size.height * 0.42f)
-                    val r = size.height * 0.56f
-                    val yantraGold = Color(0xFFD4AF37).copy(alpha = 0.14f)
-                    val yantraCyan = Color(0xFF00D2E6).copy(alpha = 0.12f)
-                    val stroke = Stroke(width = 1.2.dp.toPx())
-
-                    drawCircle(yantraGold, radius = r, center = c, style = stroke)
-                    drawCircle(yantraCyan, radius = r * 0.68f, center = c, style = stroke)
-                    for (rot in listOf(0f, 30f, 60f)) {
-                        rotate(rot, pivot = c) {
-                            val tri = Path().apply {
-                                for (v in 0..2) {
-                                    val a = (-90.0 + v * 120.0) * PI / 180.0
-                                    val px = c.x + (r * 0.78f * cos(a)).toFloat()
-                                    val py = c.y + (r * 0.78f * sin(a)).toFloat()
-                                    if (v == 0) moveTo(px, py) else lineTo(px, py)
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .drawWithCache {
+                            val c = Offset(size.width * 0.87f, size.height * 0.42f)
+                            val r = size.height * 0.56f
+                            val yantraGold = Color(0xFFD4AF37).copy(alpha = 0.14f)
+                            val yantraCyan = Color(0xFF00D2E6).copy(alpha = 0.12f)
+                            val stroke = Stroke(width = 1.2.dp.toPx())
+                            val triangles = listOf(0f, 30f, 60f).map { rot ->
+                                rot to Path().apply {
+                                    for (v in 0..2) {
+                                        val a = (-90.0 + v * 120.0) * PI / 180.0
+                                        val px = c.x + (r * 0.78f * cos(a)).toFloat()
+                                        val py = c.y + (r * 0.78f * sin(a)).toFloat()
+                                        if (v == 0) moveTo(px, py) else lineTo(px, py)
+                                    }
+                                    close()
                                 }
-                                close()
                             }
-                            drawPath(tri, yantraGold, style = stroke)
+                            onDrawBehind {
+                                drawCircle(yantraGold, radius = r, center = c, style = stroke)
+                                drawCircle(yantraCyan, radius = r * 0.68f, center = c, style = stroke)
+                                for ((rot, tri) in triangles) {
+                                    rotate(rot, pivot = c) {
+                                        drawPath(tri, yantraGold, style = stroke)
+                                    }
+                                }
+                            }
                         }
-                    }
-                }
+                )
             }
 
             Column(
@@ -498,7 +430,7 @@ private fun OraclePortalHeroBanner(
                         modifier = Modifier
                             .size(8.dp)
                             .clip(CircleShape)
-                            .background(Color(0xFF00E5FF).copy(alpha = if (palette.isEInk) 1f else energyAlpha))
+                            .background(Color(0xFF00E5FF))
                     )
                     Icon(
                         Icons.Default.AutoAwesome,
@@ -570,14 +502,6 @@ private fun VartaQuickPortalCard(
         label = "varta_portal_scale"
     )
 
-    val infiniteTransition = rememberInfiniteTransition(label = "varta_live")
-    val pulseAlpha by infiniteTransition.animateFloat(
-        initialValue = 0.45f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(900), RepeatMode.Reverse),
-        label = "varta_dot"
-    )
-
     IndoToneSurface(
         modifier = modifier
             .graphicsLayer {
@@ -617,7 +541,7 @@ private fun VartaQuickPortalCard(
                     modifier = Modifier
                         .size(8.dp)
                         .clip(CircleShape)
-                        .background(Color(0xFF10B981).copy(alpha = if (palette.isEInk) 1f else pulseAlpha))
+                        .background(Color(0xFF10B981))
                 )
             }
 
@@ -749,20 +673,6 @@ private fun QuestResumeCampaignCard(
         label = "resume_scale"
     )
 
-    val infiniteTransition = rememberInfiniteTransition(label = "node_flash_${realm.realmId.name}")
-    val flashScale by infiniteTransition.animateFloat(
-        initialValue = 1.0f,
-        targetValue = 1.32f,
-        animationSpec = infiniteRepeatable(tween(900), RepeatMode.Reverse),
-        label = "flash_scale"
-    )
-    val flashAlpha by infiniteTransition.animateFloat(
-        initialValue = 0.45f,
-        targetValue = 0.08f,
-        animationSpec = infiniteRepeatable(tween(900), RepeatMode.Reverse),
-        label = "flash_alpha"
-    )
-
     val accentColor = if (palette.isEInk) palette.accentSaffron else realm.accentPrimary
 
     IndoToneSurface(
@@ -837,19 +747,14 @@ private fun QuestResumeCampaignCard(
 
                 Spacer(modifier = Modifier.width(12.dp))
 
-                // Glowing Direct Resume Emblem Button
+                // Direct Resume Emblem Button with soft static halo
                 Box(contentAlignment = Alignment.Center) {
                     if (!palette.isEInk) {
                         Box(
                             modifier = Modifier
-                                .size(48.dp)
-                                .graphicsLayer {
-                                    scaleX = flashScale * 0.96f
-                                    scaleY = flashScale * 0.96f
-                                    alpha = flashAlpha
-                                }
+                                .size(54.dp)
                                 .clip(CircleShape)
-                                .background(Color(0xFFE88D14))
+                                .background(Color(0xFFE88D14).copy(alpha = 0.16f))
                         )
                     }
                     IconButton(
@@ -908,14 +813,9 @@ private fun QuestResumeCampaignCard(
                             if (nodeState == QuestNodeState.ACTIVE && !palette.isEInk) {
                                 Box(
                                     modifier = Modifier
-                                        .size(28.dp)
-                                        .graphicsLayer {
-                                            scaleX = flashScale
-                                            scaleY = flashScale
-                                            alpha = flashAlpha
-                                        }
+                                        .size(32.dp)
                                         .clip(CircleShape)
-                                        .background(if (lvl.isBossBattle) palette.accentVermilion else Color(0xFFE88D14))
+                                        .background((if (lvl.isBossBattle) palette.accentVermilion else Color(0xFFE88D14)).copy(alpha = 0.22f))
                                 )
                             }
 

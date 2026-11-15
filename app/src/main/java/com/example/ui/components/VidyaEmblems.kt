@@ -137,6 +137,15 @@ fun RealmCardGeometryWatermark(
                     drawLine(strokeColor, center, tip, strokeWidth = 1.1.dp.toPx())
                 }
             }
+            RealmVisualKind.PRANA_CHAKRA, RealmVisualKind.GOLDEN_SCALES,
+            RealmVisualKind.DHANUR_VAULT, RealmVisualKind.ARTHA_WHEEL,
+            RealmVisualKind.KALACHAKRA, RealmVisualKind.RAJASIC_SHIELD -> {
+                for (i in 0 until 12) {
+                    val a = i * 2.0 * PI / 12.0
+                    val tip = Offset(center.x + (radius * 0.88f * cos(a)).toFloat(), center.y + (radius * 0.88f * sin(a)).toFloat())
+                    drawLine(strokeColor, center, tip, strokeWidth = 1.1.dp.toPx())
+                }
+            }
         }
     }
 }
@@ -301,6 +310,25 @@ private fun DrawScope.drawEmblemGlyph(
             drawPath(nib, primary, style = stroke)
             drawLine(secondary, Offset(c.x - r * 0.45f, c.y + r * 0.8f), Offset(c.x + r * 0.15f, c.y - r * 0.25f), strokeWidth = 1.5.dp.toPx())
             drawCircle(secondary, radius = r * 0.22f, center = Offset(c.x - r * 0.55f, c.y + r * 0.85f))
+        }
+        RealmVisualKind.PRANA_CHAKRA -> {
+            drawCircle(primary, radius = r * 0.72f, center = c, style = stroke)
+            for (i in 0 until 8) {
+                val a = i * PI / 4.0
+                val pt = Offset(c.x + (r * 0.6f * cos(a)).toFloat(), c.y + (r * 0.6f * sin(a)).toFloat())
+                drawCircle(secondary, radius = 2.5.dp.toPx(), center = pt)
+            }
+        }
+        RealmVisualKind.GOLDEN_SCALES, RealmVisualKind.ARTHA_WHEEL -> {
+            drawLine(primary, Offset(c.x - r * 0.7f, c.y), Offset(c.x + r * 0.7f, c.y), strokeWidth = 1.6.dp.toPx())
+            drawLine(secondary, Offset(c.x, c.y - r * 0.6f), Offset(c.x, c.y + r * 0.6f), strokeWidth = 1.6.dp.toPx())
+            drawCircle(primary, radius = r * 0.25f, center = Offset(c.x - r * 0.5f, c.y + r * 0.3f), style = stroke)
+            drawCircle(primary, radius = r * 0.25f, center = Offset(c.x + r * 0.5f, c.y + r * 0.3f), style = stroke)
+        }
+        RealmVisualKind.DHANUR_VAULT, RealmVisualKind.KALACHAKRA, RealmVisualKind.RAJASIC_SHIELD -> {
+            drawCircle(primary, radius = r * 0.65f, center = c, style = stroke)
+            drawLine(secondary, Offset(c.x, c.y - r * 0.75f), Offset(c.x, c.y + r * 0.75f), strokeWidth = 1.5.dp.toPx())
+            drawLine(secondary, Offset(c.x - r * 0.75f, c.y), Offset(c.x + r * 0.75f, c.y), strokeWidth = 1.5.dp.toPx())
         }
     }
 }

@@ -36,11 +36,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.graphics.toArgb
+import com.example.ui.components.PasaDiceNativeView
 import com.example.ui.theme.IndoToneSurface
 import com.example.ui.theme.LocalIndoPalette
 import com.example.utils.IndoMotion
 import com.example.viewmodel.GameType
-import kotlinx.coroutines.delay
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
@@ -141,8 +142,8 @@ fun GameZoneBackdrop(
 }
 
 /**
- * Multi-axis 3D GPU-accelerated Pasa / Dice control with bounce, tumble rotation,
- * mid-air face cycling, and crisp settle onto final value.
+ * True 3D Native C++ OpenGL ES 3.0 Pasa / Dice control with bevelled superellipsoid cube geometry,
+ * SDF carved pips, physical tumble momentum, and smooth shortest-path settle onto the rolled face.
  */
 @Composable
 fun AnimatedPasaDice(
@@ -151,90 +152,49 @@ fun AnimatedPasaDice(
     accentColor: Color,
     enabled: Boolean,
     testTag: String,
+    isActive: Boolean = true,
     pieceHint: String? = null,
     onClick: () -> Unit
 ) {
     val palette = LocalIndoPalette.current
-    var displayFace by remember { mutableStateOf(diceValue) }
-
-    val rotX = remember { Animatable(0f) }
-    val rotY = remember { Animatable(0f) }
-    val rotZ = remember { Animatable(0f) }
-    val bounceY = remember { Animatable(0f) }
-    val scale = remember { Animatable(1f) }
-
-    LaunchedEffect(isRolling) {
-        if (isRolling) {
-            // Upward jump & 3D tumble loop while rolling
-            bounceY.animateTo(-18f, tween(140, easing = IndoMotion.OrganicDeceleration))
-            scale.animateTo(1.16f, tween(120, easing = IndoMotion.OrganicDeceleration))
-            var tick = 0
-            while (isRolling) {
-                displayFace = ((tick * 2 + 1) % 6) + 1
-                rotX.snapTo((rotX.value + 115f) % 360f)
-                rotY.snapTo((rotY.value + 145f) % 360f)
-                rotZ.snapTo((rotZ.value + 65f) % 360f)
-                tick++
-                delay(55)
-            }
-        } else {
-            displayFace = diceValue
-            // Crisp settle back onto surface
-            rotX.animateTo(0f, spring(dampingRatio = 0.55f, stiffness = Spring.StiffnessMedium))
-            rotY.animateTo(0f, spring(dampingRatio = 0.55f, stiffness = Spring.StiffnessMedium))
-            rotZ.animateTo(0f, spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessMedium))
-            bounceY.animateTo(0f, spring(dampingRatio = 0.5f, stiffness = Spring.StiffnessMediumLow))
-            scale.animateTo(1.06f, tween(80))
-            scale.animateTo(1f, tween(140, easing = IndoMotion.OrganicDeceleration))
-        }
-    }
-
-    LaunchedEffect(diceValue) {
-        if (!isRolling) {
-            displayFace = diceValue
-        }
-    }
 
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(3.dp)
     ) {
-        Surface(
-            modifier = Modifier
-                .size(62.dp)
-                .testTag(testTag)
-                .graphicsLayer {
-                    rotationX = rotX.value
-                    rotationY = rotY.value
-                    rotationZ = rotZ.value
-                    translationY = bounceY.value
-                    scaleX = scale.value
-                    scaleY = scale.value
-                    cameraDistance = 12f * density
+        if (palette.isEInk) {
+            Surface(
+                modifier = Modifier
+                    .size(64.dp)
+                    .testTag(testTag)
+                    .clickable(enabled = enabled, onClick = onClick),
+                shape = RoundedCornerShape(16.dp),
+                color = accentColor,
+                border = BorderStroke(1.dp, palette.goldHairline),
+                shadowElevation = 0.dp
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Canvas(modifier = Modifier.size(40.dp)) {
+                        drawDiePips(diceValue, Color.White)
+                    }
                 }
-                .clickable(enabled = enabled, onClick = onClick),
-            shape = RoundedCornerShape(16.dp),
-            color = accentColor,
-            border = BorderStroke(1.dp, if (enabled) palette.accentGold.copy(alpha = 0.78f) else palette.goldHairline),
-            shadowElevation = 0.dp
-        ) {
+            }
+        } else {
             Box(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        Brush.linearGradient(
-                            colors = listOf(
-                                Color.White.copy(alpha = 0.18f),
-                                Color.Transparent,
-                                Color.Black.copy(alpha = 0.18f)
-                            )
-                        )
-                    ),
+                    .size(72.dp)
+                    .testTag(testTag)
+                    .clickable(enabled = enabled, onClick = onClick),
                 contentAlignment = Alignment.Center
             ) {
-                Canvas(modifier = Modifier.size(40.dp)) {
-                    drawDiePips(displayFace, Color.White)
-                }
+                PasaDiceNativeView(
+                    modifier = Modifier.fillMaxSize(),
+                    isActive = isActive,
+                    diceValue = diceValue,
+                    isRolling = isRolling,
+                    accentColorHex = accentColor.toArgb() and 0xFFFFFF,
+                    enabled = enabled
+                )
             }
         }
 

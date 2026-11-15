@@ -73,25 +73,45 @@ import kotlin.math.sin
 fun VidyaLecturePlayer(
     level: QuestLevel,
     accentColor: Color,
+    initialPositionSec: Int = 0,
+    onProgressUpdate: (positionSec: Int, totalDurationSec: Int) -> Unit = { _, _ -> },
     onCheckpointAnswered: (VidyaQuizQuestion, Int) -> Unit,
     onLectureCompleted: () -> Unit
 ) {
     val palette = LocalIndoPalette.current
     val context = LocalContext.current
 
+    val startingProgress = remember(level.id, initialPositionSec) {
+        if (level.videoDurationSeconds > 0 && initialPositionSec > 0) {
+            (initialPositionSec.toFloat() / level.videoDurationSeconds).coerceIn(0f, 0.95f)
+        } else {
+            0f
+        }
+    }
+
     var isPlaying by remember(level.id) { mutableStateOf(true) }
-    var progress by remember(level.id) { mutableFloatStateOf(0f) }
+    var progress by remember(level.id) { mutableFloatStateOf(startingProgress) }
     var playbackSpeed by remember(level.id) { mutableFloatStateOf(1f) }
-    var clearedCheckpointIds by remember(level.id) { mutableStateOf(emptySet<String>()) }
+    var clearedCheckpointIds by remember(level.id) {
+        mutableStateOf(
+            if (startingProgress > 0f) {
+                level.checkpoints.filter { it.triggerProgress <= startingProgress }.map { it.id }.toSet()
+            } else {
+                emptySet()
+            }
+        )
+    }
     var activeCheckpoint by remember(level.id) { mutableStateOf<MidVideoCheckpoint?>(null) }
     var selectedCheckpointOption by remember(level.id) { mutableStateOf<Int?>(null) }
     var checkpointSubmitted by remember(level.id) { mutableStateOf(false) }
-    var videoFinished by remember(level.id) { mutableStateOf(false) }
+    var videoFinished by remember(level.id) { mutableStateOf(startingProgress >= 0.99f) }
 
     // Deterministic lecture loop with auto-pausing checkpoint detection
     LaunchedEffect(level.id, isPlaying, playbackSpeed, activeCheckpoint, videoFinished) {
+        var tickCount = 0
         while (isPlaying && activeCheckpoint == null && !videoFinished) {
             delay(80L)
+            tickCount++
             val step = (0.08f * playbackSpeed) / level.videoDurationSeconds.coerceAtLeast(10).toFloat()
             val next = (progress + step).coerceAtMost(1f)
 
@@ -105,12 +125,18 @@ fun VidyaLecturePlayer(
                 selectedCheckpointOption = null
                 checkpointSubmitted = false
                 SoundHelper.playWoodyTock(context)
+                onProgressUpdate((progress * level.videoDurationSeconds).toInt(), level.videoDurationSeconds)
             } else {
                 progress = next
+                if (tickCount % 12 == 0) {
+                    onProgressUpdate((progress * level.videoDurationSeconds).toInt(), level.videoDurationSeconds)
+                }
                 if (next >= 1f) {
                     isPlaying = false
                     videoFinished = true
                     SoundHelper.playTempleChime(context)
+                    onProgressUpdate(level.videoDurationSeconds, level.videoDurationSeconds)
+                    onLectureCompleted()
                 }
             }
         }
@@ -262,6 +288,11 @@ fun VidyaLecturePlayer(
                                         center = pt
                                     )
                                 }
+                            }
+                            else -> {
+                                val r = w * 0.22f * (0.85f + 0.15f * sin(progress * PI * 4).toFloat())
+                                drawCircle(goldColor, radius = r.coerceAtLeast(12f), center = c, style = Stroke(2.5.dp.toPx()))
+                                drawCircle(lineColor, radius = 8f, center = c)
                             }
                         }
                     }

@@ -59,12 +59,18 @@ data class UserProfile(
     val avatarToneId: String = "saffron",
     val localAvatarPhotoPath: String = "",
     val focusRealm: String = "MATHEMATICS",
+    val standardId: String = "class_11",
+    val streamId: String = "science_pcm",
+    val batchType: String = "live",
+    val completedStandards: List<String> = emptyList(),
     val onboardingCompleted: Boolean = false,
     val streak: Int = 5,
     val xp: Int = 1250,
     val level: String = "Silver Scholar",
     val hearts: Int = 5,
     val completedLessons: List<String> = emptyList(),
+    val publicKey: String = "",
+    val keyVersion: Int = 1,
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
 ) {
@@ -98,6 +104,8 @@ data class VidyaIdentityCard(
     val avatarFrameId: String = "astrolabe",
     val avatarToneId: String = "saffron",
     val focusRealm: String = "MATHEMATICS",
+    val publicKey: String = "",
+    val keyVersion: Int = 1,
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
 ) {
@@ -241,6 +249,10 @@ data class ChatMessage(
     val senderVidyaId: String = "",
     val memberUids: List<String> = emptyList(),
     val text: String = "",
+    val ciphertext: String = "",
+    val iv: String = "",
+    val keyVersion: Int = 1,
+    val isEncrypted: Boolean = false,
     val isUser: Boolean = false,
     val timestamp: Long = System.currentTimeMillis()
 )
@@ -254,12 +266,16 @@ data class Chat(
     val peerVidyaId: String = "",
     val peerAvatarSpec: AvatarSpec? = null,
     val lastMessage: String = "",
+    val lastMessageIv: String = "",
     val lastTimestamp: Long = 0L,
     val type: String = "individual",
     val subjectTag: String = "General",
     val unreadCount: Int = 0,
     val isOnline: Boolean = false,
-    val timestampLabel: String = "Just now"
+    val timestampLabel: String = "Just now",
+    val wrappedKeys: Map<String, String> = emptyMap(),
+    val keyVersion: Int = 1,
+    val isEncrypted: Boolean = false
 )
 
 data class Message(

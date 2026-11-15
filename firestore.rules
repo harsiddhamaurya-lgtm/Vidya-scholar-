@@ -58,7 +58,9 @@ service cloud.firestore {
                data.completedLessons is list &&
                data.completedLessons.size() <= 200 &&
                (data.completedLessons.size() == 0 || data.completedLessons[0] is string)
-             ));
+             )) &&
+             (!('publicKey' in data) || (data.publicKey is string && data.publicKey.size() <= 1024)) &&
+             (!('keyVersion' in data) || (data.keyVersion is int && data.keyVersion >= 1 && data.keyVersion <= 100));
     }
 
     function isValidVidyaIdentityCard(data, vidyaKey) {
@@ -74,7 +76,9 @@ service cloud.firestore {
              (!('avatarCrestId' in data) || (data.avatarCrestId is string && data.avatarCrestId.size() <= 40)) &&
              (!('avatarFrameId' in data) || (data.avatarFrameId is string && data.avatarFrameId.size() <= 40)) &&
              (!('avatarToneId' in data) || (data.avatarToneId is string && data.avatarToneId.size() <= 40)) &&
-             (!('focusRealm' in data) || (data.focusRealm is string && data.focusRealm.size() <= 32));
+             (!('focusRealm' in data) || (data.focusRealm is string && data.focusRealm.size() <= 32)) &&
+             (!('publicKey' in data) || (data.publicKey is string && data.publicKey.size() <= 1024)) &&
+             (!('keyVersion' in data) || (data.keyVersion is int && data.keyVersion >= 1 && data.keyVersion <= 100));
     }
 
     function isValidChat(data) {
@@ -87,11 +91,15 @@ service cloud.firestore {
              data.lastTimestamp is int &&
              (!('name' in data) || (data.name is string && data.name.size() <= 100)) &&
              (!('peerVidyaId' in data) || (data.peerVidyaId is string && data.peerVidyaId.size() <= 30)) &&
-             (!('lastMessage' in data) || (data.lastMessage is string && data.lastMessage.size() <= 1000)) &&
+             (!('lastMessage' in data) || (data.lastMessage is string && data.lastMessage.size() <= 1500)) &&
+             (!('lastMessageIv' in data) || (data.lastMessageIv is string && data.lastMessageIv.size() <= 64)) &&
              (!('subjectTag' in data) || (data.subjectTag is string && data.subjectTag.size() <= 40)) &&
              (!('unreadCount' in data) || (data.unreadCount is int && data.unreadCount >= 0 && data.unreadCount <= 10000)) &&
              (!('isOnline' in data) || data.isOnline is bool) &&
-             (!('timestampLabel' in data) || (data.timestampLabel is string && data.timestampLabel.size() <= 40));
+             (!('timestampLabel' in data) || (data.timestampLabel is string && data.timestampLabel.size() <= 40)) &&
+             (!('wrappedKeys' in data) || (data.wrappedKeys is map && data.wrappedKeys.size() <= 50)) &&
+             (!('keyVersion' in data) || (data.keyVersion is int && data.keyVersion >= 1 && data.keyVersion <= 100)) &&
+             (!('isEncrypted' in data) || data.isEncrypted is bool);
     }
 
     function isValidMessage(data) {
@@ -103,7 +111,49 @@ service cloud.firestore {
              data.text is string && data.text.size() >= 1 && data.text.size() <= 2000 &&
              data.timestamp is int &&
              (!('senderName' in data) || (data.senderName is string && data.senderName.size() <= 60)) &&
-             (!('senderVidyaId' in data) || (data.senderVidyaId is string && data.senderVidyaId.size() <= 24));
+             (!('senderVidyaId' in data) || (data.senderVidyaId is string && data.senderVidyaId.size() <= 24)) &&
+             (!('ciphertext' in data) || (data.ciphertext is string && data.ciphertext.size() <= 8192)) &&
+             (!('iv' in data) || (data.iv is string && data.iv.size() <= 64)) &&
+             (!('keyVersion' in data) || (data.keyVersion is int && data.keyVersion >= 1 && data.keyVersion <= 100)) &&
+             (!('isEncrypted' in data) || data.isEncrypted is bool) &&
+             (!('isEncrypted' in data) || data.isEncrypted == false || (
+               'ciphertext' in data && data.ciphertext is string && data.ciphertext.size() >= 1 &&
+               'iv' in data && data.iv is string && data.iv.size() >= 1
+             ));
+    }
+
+    function isValidGameType(gameType) {
+      return gameType in ['SHATRANJ', 'LUDO', 'CHATURANGA'];
+    }
+
+    function isValidMatchmakingTicket(data) {
+      return data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 &&
+             data.vidyaId is string && data.vidyaId.size() >= 1 && data.vidyaId.size() <= 30 &&
+             (!('displayName' in data) || (data.displayName is string && data.displayName.size() <= 60)) &&
+             isValidGameType(data.gameType) &&
+             data.eloRating is int && data.eloRating >= 0 && data.eloRating <= 10000 &&
+             data.requiredPlayers is int && data.requiredPlayers >= 2 && data.requiredPlayers <= 4 &&
+             (!('publicKey' in data) || (data.publicKey is string && data.publicKey.size() <= 1024)) &&
+             data.status in ['searching', 'matched', 'cancelled'] &&
+             (!('matchId' in data) || (data.matchId is string && data.matchId.size() <= 128));
+    }
+
+    function isValidOnlineMatch(data) {
+      return data.createdBy is string && data.createdBy.size() >= 1 && data.createdBy.size() <= 128 &&
+             data.participantUids is list &&
+             data.participantUids.size() >= 2 &&
+             data.participantUids.size() <= 4 &&
+             data.participantUids[0] is string &&
+             isValidGameType(data.gameType) &&
+             data.status in ['waiting', 'active', 'completed'] &&
+             data.currentTurnUid is string && data.currentTurnUid in data.participantUids &&
+             data.moveSeq is int && data.moveSeq >= 0 && data.moveSeq <= 50000 &&
+             (!('wrappedKeys' in data) || (data.wrappedKeys is map && data.wrappedKeys.size() <= 8)) &&
+             (!('keyVersion' in data) || (data.keyVersion is int && data.keyVersion >= 1 && data.keyVersion <= 100)) &&
+             (!('encryptedState' in data) || (data.encryptedState is string && data.encryptedState.size() <= 16384)) &&
+             (!('stateIv' in data) || (data.stateIv is string && data.stateIv.size() <= 64)) &&
+             (!('stateDigest' in data) || (data.stateDigest is string && data.stateDigest.size() <= 128)) &&
+             (!('winnerUid' in data) || (data.winnerUid is string && data.winnerUid.size() <= 128));
     }
 
     match /users/{userId} {
@@ -120,6 +170,7 @@ service cloud.firestore {
                          'avatarMode', 'avatarPresetId', 'avatarCrestId', 'avatarFrameId', 'avatarToneId', 'localAvatarPhotoPath',
                          'focusRealm', 'onboardingCompleted',
                          'streak', 'xp', 'level', 'hearts', 'completedLessons',
+                         'publicKey', 'keyVersion',
                          'createdAt', 'updatedAt'
                        ]) &&
                        incoming().createdAt is timestamp && incoming().createdAt <= request.time &&
@@ -139,6 +190,7 @@ service cloud.firestore {
                          'avatarMode', 'avatarPresetId', 'avatarCrestId', 'avatarFrameId', 'avatarToneId', 'localAvatarPhotoPath',
                          'focusRealm', 'onboardingCompleted',
                          'streak', 'xp', 'level', 'hearts', 'completedLessons',
+                         'publicKey', 'keyVersion',
                          'updatedAt'
                        ]);
 
@@ -159,7 +211,7 @@ service cloud.firestore {
                        incoming().keys().hasOnly([
                          'uid', 'vidyaId', 'vidyaHandle', 'vidyaDiscriminator', 'displayName', 'level',
                          'avatarMode', 'avatarPresetId', 'avatarCrestId', 'avatarFrameId', 'avatarToneId',
-                         'focusRealm', 'createdAt', 'updatedAt'
+                         'focusRealm', 'publicKey', 'keyVersion', 'createdAt', 'updatedAt'
                        ]) &&
                        incoming().createdAt is timestamp && incoming().createdAt <= request.time &&
                        incoming().updatedAt is timestamp && incoming().updatedAt <= request.time &&
@@ -174,7 +226,7 @@ service cloud.firestore {
                        isValidVidyaIdentityCard(incoming(), vidyaKey) &&
                        incoming().diff(existing()).affectedKeys().hasOnly([
                          'displayName', 'level', 'avatarMode', 'avatarPresetId', 'avatarCrestId',
-                         'avatarFrameId', 'avatarToneId', 'focusRealm', 'updatedAt'
+                         'avatarFrameId', 'avatarToneId', 'focusRealm', 'publicKey', 'keyVersion', 'updatedAt'
                        ]);
 
       allow delete: if isSignedIn() && isValidVidyaKey(vidyaKey) && existing().uid == request.auth.uid;
@@ -190,8 +242,9 @@ service cloud.firestore {
                        (request.auth.uid in incoming().participants) &&
                        incoming().keys().hasAll(['createdBy', 'participants', 'type', 'lastTimestamp', 'createdAt', 'updatedAt']) &&
                        incoming().keys().hasOnly([
-                         'createdBy', 'participants', 'name', 'peerVidyaId', 'lastMessage', 'lastTimestamp',
-                         'type', 'subjectTag', 'unreadCount', 'isOnline', 'timestampLabel', 'createdAt', 'updatedAt'
+                         'createdBy', 'participants', 'name', 'peerVidyaId', 'lastMessage', 'lastMessageIv', 'lastTimestamp',
+                         'type', 'subjectTag', 'unreadCount', 'isOnline', 'timestampLabel',
+                         'wrappedKeys', 'keyVersion', 'isEncrypted', 'createdAt', 'updatedAt'
                        ]) &&
                        incoming().createdAt is timestamp && incoming().createdAt <= request.time &&
                        incoming().updatedAt is timestamp && incoming().updatedAt <= request.time &&
@@ -206,14 +259,21 @@ service cloud.firestore {
                        incoming().updatedAt is timestamp && incoming().updatedAt <= request.time &&
                        isValidChat(incoming()) &&
                        incoming().diff(existing()).affectedKeys().hasOnly([
-                         'participants', 'name', 'lastMessage', 'lastTimestamp', 'unreadCount', 'timestampLabel', 'updatedAt'
+                         'participants', 'name', 'lastMessage', 'lastMessageIv', 'lastTimestamp',
+                         'unreadCount', 'timestampLabel', 'wrappedKeys', 'keyVersion', 'isEncrypted', 'updatedAt'
                        ]);
 
       allow delete: if isSignedIn() && isValidId(chatId) && existing().createdBy == request.auth.uid;
 
       match /messages/{messageId} {
-        allow get: if isSignedIn() && isValidId(chatId) && isValidId(messageId) && (request.auth.uid in existing().memberUids);
-        allow list: if isSignedIn() && isValidId(chatId) && (request.auth.uid in existing().memberUids);
+        allow get: if isSignedIn() && isValidId(chatId) && isValidId(messageId) &&
+                      (request.auth.uid in existing().memberUids) &&
+                      exists(/databases/$(database)/documents/chats/$(chatId)) &&
+                      (request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants);
+        allow list: if isSignedIn() && isValidId(chatId) &&
+                       (request.auth.uid in existing().memberUids) &&
+                       exists(/databases/$(database)/documents/chats/$(chatId)) &&
+                       (request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants);
 
         allow create: if isSignedIn() &&
                          isValidId(chatId) &&
@@ -221,7 +281,11 @@ service cloud.firestore {
                          incoming().senderId == request.auth.uid &&
                          (request.auth.uid in incoming().memberUids) &&
                          incoming().keys().hasAll(['senderId', 'memberUids', 'text', 'timestamp', 'createdAt']) &&
-                         incoming().keys().hasOnly(['senderId', 'senderName', 'senderVidyaId', 'memberUids', 'text', 'timestamp', 'createdAt']) &&
+                         incoming().keys().hasOnly([
+                           'senderId', 'senderName', 'senderVidyaId', 'memberUids',
+                           'text', 'ciphertext', 'iv', 'keyVersion', 'isEncrypted',
+                           'timestamp', 'createdAt'
+                         ]) &&
                          incoming().createdAt is timestamp && incoming().createdAt <= request.time &&
                          isValidMessage(incoming()) &&
                          exists(/databases/$(database)/documents/chats/$(chatId)) &&
@@ -229,6 +293,93 @@ service cloud.firestore {
 
         allow update, delete: if false;
       }
+    }
+
+    match /matchmakingTickets/{ticketId} {
+      allow get: if isSignedIn() && isValidId(ticketId);
+      allow list: if isSignedIn() && (existing().uid == request.auth.uid || existing().status == 'searching');
+
+      allow create: if isSignedIn() &&
+                       isValidId(ticketId) &&
+                       incoming().uid == request.auth.uid &&
+                       incoming().status == 'searching' &&
+                       incoming().keys().hasAll(['uid', 'vidyaId', 'gameType', 'eloRating', 'requiredPlayers', 'status', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly([
+                         'uid', 'vidyaId', 'displayName', 'gameType', 'eloRating', 'requiredPlayers',
+                         'publicKey', 'status', 'matchId', 'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().createdAt is timestamp && incoming().createdAt <= request.time &&
+                       incoming().updatedAt is timestamp && incoming().updatedAt <= request.time &&
+                       isValidMatchmakingTicket(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidId(ticketId) &&
+                       existing().status == 'searching' &&
+                       incoming().uid == existing().uid &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().updatedAt is timestamp && incoming().updatedAt <= request.time &&
+                       isValidMatchmakingTicket(incoming()) && (
+                         // Action 1: Ticket owner cancels searching ticket
+                         (existing().uid == request.auth.uid &&
+                          incoming().status == 'cancelled' &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])) ||
+                         // Action 2: Opponent claims searching ticket atomically alongside onlineMatches room creation
+                         (incoming().status == 'matched' &&
+                          incoming().matchId is string && incoming().matchId.size() >= 1 &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['status', 'matchId', 'updatedAt']) &&
+                          existsAfter(/databases/$(database)/documents/onlineMatches/$(incoming().matchId)))
+                       );
+
+      allow delete: if isSignedIn() && isValidId(ticketId) && existing().uid == request.auth.uid;
+    }
+
+    match /onlineMatches/{matchId} {
+      allow get: if isSignedIn() && isValidId(matchId) && (request.auth.uid in existing().participantUids);
+      allow list: if isSignedIn() && (request.auth.uid in existing().participantUids);
+
+      allow create: if isSignedIn() &&
+                       isValidId(matchId) &&
+                       incoming().createdBy == request.auth.uid &&
+                       (request.auth.uid in incoming().participantUids) &&
+                       incoming().moveSeq == 0 &&
+                       incoming().status in ['waiting', 'active'] &&
+                       incoming().keys().hasAll(['createdBy', 'participantUids', 'gameType', 'status', 'currentTurnUid', 'moveSeq', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly([
+                         'createdBy', 'participantUids', 'gameType', 'status', 'currentTurnUid', 'moveSeq',
+                         'wrappedKeys', 'keyVersion', 'encryptedState', 'stateIv', 'stateDigest', 'winnerUid',
+                         'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().createdAt is timestamp && incoming().createdAt <= request.time &&
+                       incoming().updatedAt is timestamp && incoming().updatedAt <= request.time &&
+                       isValidOnlineMatch(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidId(matchId) &&
+                       (request.auth.uid in existing().participantUids) &&
+                       existing().status != 'completed' &&
+                       incoming().createdBy == existing().createdBy &&
+                       incoming().participantUids == existing().participantUids &&
+                       incoming().gameType == existing().gameType &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().updatedAt is timestamp && incoming().updatedAt <= request.time &&
+                       isValidOnlineMatch(incoming()) && (
+                         // Action 1: Activate waiting room / distribute wrapped session keys
+                         (existing().status == 'waiting' &&
+                          incoming().status in ['waiting', 'active'] &&
+                          incoming().diff(existing()).affectedKeys().hasOnly([
+                            'status', 'wrappedKeys', 'keyVersion', 'encryptedState', 'stateIv', 'stateDigest', 'currentTurnUid', 'updatedAt'
+                          ])) ||
+                         // Action 2: Submit sequential encrypted turn strictly by currentTurnUid
+                         (existing().status == 'active' &&
+                          existing().currentTurnUid == request.auth.uid &&
+                          incoming().moveSeq == existing().moveSeq + 1 &&
+                          incoming().status in ['active', 'completed'] &&
+                          incoming().diff(existing()).affectedKeys().hasOnly([
+                            'currentTurnUid', 'moveSeq', 'encryptedState', 'stateIv', 'stateDigest', 'status', 'winnerUid', 'updatedAt'
+                          ]))
+                       );
+
+      allow delete: if false;
     }
   }
 }

@@ -39,6 +39,7 @@ fun AuthScreen(
     val palette = LocalIndoPalette.current
 
     LaunchedEffect(Unit) {
+        kotlinx.coroutines.delay(250)
         authViewModel.attemptAutoSignIn(context)
     }
 
@@ -204,6 +205,24 @@ fun AuthScreen(
                 ) {
                     Text(
                         text = stringResource(R.string.auth_local_preview),
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 14.sp
+                    )
+                }
+
+                OutlinedButton(
+                    onClick = { authViewModel.generateDynamicTestAccount(startOnboarding = true) },
+                    enabled = !isLoading,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp)
+                        .testTag("dynamic_test_account_button"),
+                    shape = RoundedCornerShape(16.dp),
+                    border = BorderStroke(1.dp, palette.accentCyan),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = palette.accentCyan)
+                ) {
+                    Text(
+                        text = "🧪 Generate Dynamic Test Account",
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 14.sp
                     )

@@ -7,7 +7,15 @@ enum class RealmId(val subjectName: String, val subtitle: String, val courseId: 
     PHYSICS("Physics", "Quantum & Classical Laws", "physics_101"),
     CHEMISTRY("Chemistry", "Molecular Alchemy & Bonds", "chem_101"),
     CODING_AI("Coding & AI", "Neural Logic & Algorithms", "ai_coding_101"),
-    ENGLISH("English", "Rhetoric & Kavya Craft", "english_101")
+    ENGLISH("English", "Rhetoric & Kavya Craft", "english_101"),
+    BIOLOGY("Biology", "Cellular Charkha & Genetics", "bio_101"),
+    ACCOUNTANCY("Accountancy", "Balance & Lekha Shastra", "acc_101"),
+    BUSINESS_STUDIES("Business Studies", "Commerce & Vyapar Niti", "bst_101"),
+    ECONOMICS("Economics", "Wealth & Artha Shastra", "eco_101"),
+    HISTORY("History", "Civilizations & Itihasa", "hist_101"),
+    POLITICAL_SCIENCE("Political Science", "Rajneeti & Constitution", "pol_101"),
+    SCIENCE_FOUNDATION("Science", "Physics, Chemistry & Living Systems", "sci_101"),
+    SOCIAL_SCIENCE("Social Science", "History, Geography & Civics", "sst_101")
 }
 
 enum class RealmVisualKind {
@@ -15,7 +23,13 @@ enum class RealmVisualKind {
     ATOMIC_CHAKRA,
     ALCHEMICAL_LOTUS,
     NEURAL_MANDALA,
-    KAVYA_QUILL
+    KAVYA_QUILL,
+    PRANA_CHAKRA,
+    GOLDEN_SCALES,
+    DHANUR_VAULT,
+    ARTHA_WHEEL,
+    KALACHAKRA,
+    RAJASIC_SHIELD
 }
 
 enum class QuestNodeState {
@@ -56,7 +70,12 @@ data class QuestLevel(
     val scrollSummary: String,
     val keyFormulas: List<String>,
     val bossTitle: String = "",
-    val bossQuestions: List<VidyaQuizQuestion> = emptyList() // 10 questions x 5 marks = 50 marks
+    val bossQuestions: List<VidyaQuizQuestion> = emptyList(), // 10 questions x 5 marks = 50 marks
+    val isLiveStream: Boolean = false,
+    val videoUrl: String = "",
+    val standardId: String = "class_11",
+    val streamId: String = "science_pcm",
+    val batchType: String = "live"
 )
 
 data class SubjectRealm(

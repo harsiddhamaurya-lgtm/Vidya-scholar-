@@ -1,7 +1,6 @@
 package com.example.ui.theme
 
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -10,6 +9,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -42,82 +42,77 @@ fun IndoAtmosphericBackdrop(
             .background(baseColor ?: palette.baseBg)
     ) {
         if (!palette.isEInk) {
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                // Soft cinematic ambient top-right glow (kept at low opacity for calm eyes)
-                drawCircle(
-                    brush = Brush.radialGradient(
-                        colors = listOf(
-                            glowColor.copy(alpha = if (palette.isDark) 0.11f else 0.08f),
-                            Color.Transparent
-                        ),
-                        center = Offset(size.width * 0.85f, size.height * 0.12f),
-                        radius = size.width * 0.72f
-                    ),
-                    radius = size.width * 0.72f,
-                    center = Offset(size.width * 0.85f, size.height * 0.12f)
-                )
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .drawWithCache {
+                        val topCenter = Offset(size.width * 0.85f, size.height * 0.12f)
+                        val topRadius = size.width * 0.72f
+                        val topBrush = Brush.radialGradient(
+                            colors = listOf(
+                                glowColor.copy(alpha = if (palette.isDark) 0.11f else 0.08f),
+                                Color.Transparent
+                            ),
+                            center = topCenter,
+                            radius = topRadius.coerceAtLeast(1f)
+                        )
 
-                // Soft opposing gold warmth behind lower-left lattice
-                drawCircle(
-                    brush = Brush.radialGradient(
-                        colors = listOf(
-                            palette.accentGold.copy(alpha = if (palette.isDark) 0.07f else 0.055f),
-                            Color.Transparent
-                        ),
-                        center = Offset(size.width * 0.12f, size.height * 0.88f),
-                        radius = size.width * 0.58f
-                    ),
-                    radius = size.width * 0.58f,
-                    center = Offset(size.width * 0.12f, size.height * 0.88f)
-                )
+                        val botCenter = Offset(size.width * 0.12f, size.height * 0.88f)
+                        val botRadius = size.width * 0.58f
+                        val botBrush = Brush.radialGradient(
+                            colors = listOf(
+                                palette.accentGold.copy(alpha = if (palette.isDark) 0.07f else 0.055f),
+                                Color.Transparent
+                            ),
+                            center = botCenter,
+                            radius = botRadius.coerceAtLeast(1f)
+                        )
 
-                // Subtle 4%–6% Sacred Mandala Watermark in top corner
-                val cx = size.width * 0.88f
-                val cy = size.height * 0.14f
-                val mandalaColor = palette.watermarkTint
-                val stroke = Stroke(width = 1.dp.toPx())
+                        val mandalaColor = palette.watermarkTint
+                        val stroke = Stroke(width = 1.dp.toPx())
+                        val spokeStroke = 0.8.dp.toPx()
+                        val cx = size.width * 0.88f
+                        val cy = size.height * 0.14f
+                        val ring1 = 44.dp.toPx()
+                        val ring2 = 88.dp.toPx()
+                        val ring3 = 132.dp.toPx()
 
-                for (ring in 1..3) {
-                    drawCircle(
-                        color = mandalaColor,
-                        radius = ring * 44.dp.toPx(),
-                        center = Offset(cx, cy),
-                        style = stroke
-                    )
-                }
-
-                // 8-petal lotus / star geometric spokes
-                for (i in 0 until 8) {
-                    val angle = (i * PI / 4.0)
-                    val endX = cx + (132.dp.toPx() * cos(angle)).toFloat()
-                    val endY = cy + (132.dp.toPx() * sin(angle)).toFloat()
-                    drawLine(
-                        color = mandalaColor,
-                        start = Offset(cx, cy),
-                        end = Offset(endX, endY),
-                        strokeWidth = 0.8.dp.toPx()
-                    )
-                }
-
-                // Subtle bottom-left architectural jali lattice diamond accents (3.5% opacity)
-                val step = 34.dp.toPx()
-                val startX = -step
-                val startY = size.height * 0.76f
-                for (r in 0..3) {
-                    for (c in 0..3) {
-                        val px = startX + c * step + (if (r % 2 == 1) step * 0.5f else 0f)
-                        val py = startY + r * (step * 0.65f)
-                        val diamond = Path().apply {
-                            moveTo(px, py - step * 0.28f)
-                            lineTo(px + step * 0.28f, py)
-                            lineTo(px, py + step * 0.28f)
-                            lineTo(px - step * 0.28f, py)
-                            close()
+                        val combinedSpokesAndLattice = Path().apply {
+                            for (i in 0 until 8) {
+                                val angle = i * PI / 4.0
+                                moveTo(cx, cy)
+                                lineTo(
+                                    cx + (ring3 * cos(angle)).toFloat(),
+                                    cy + (ring3 * sin(angle)).toFloat()
+                                )
+                            }
+                            val step = 34.dp.toPx()
+                            val halfDiamond = step * 0.28f
+                            val startX = -step
+                            val startY = size.height * 0.76f
+                            for (r in 0..3) {
+                                for (c in 0..3) {
+                                    val px = startX + c * step + (if (r % 2 == 1) step * 0.5f else 0f)
+                                    val py = startY + r * (step * 0.65f)
+                                    moveTo(px, py - halfDiamond)
+                                    lineTo(px + halfDiamond, py)
+                                    lineTo(px, py + halfDiamond)
+                                    lineTo(px - halfDiamond, py)
+                                    close()
+                                }
+                            }
                         }
-                        drawPath(diamond, color = mandalaColor, style = stroke)
+
+                        onDrawBehind {
+                            drawCircle(brush = topBrush, radius = topRadius, center = topCenter)
+                            drawCircle(brush = botBrush, radius = botRadius, center = botCenter)
+                            drawCircle(color = mandalaColor, radius = ring1, center = Offset(cx, cy), style = stroke)
+                            drawCircle(color = mandalaColor, radius = ring2, center = Offset(cx, cy), style = stroke)
+                            drawCircle(color = mandalaColor, radius = ring3, center = Offset(cx, cy), style = stroke)
+                            drawPath(combinedSpokesAndLattice, color = mandalaColor, style = Stroke(width = spokeStroke))
+                        }
                     }
-                }
-            }
+            )
         }
         content()
     }

@@ -266,12 +266,14 @@ fun LudoGameView(
                             )
                         }
 
+                        val rulebookOpen = viewModel.rulebookGameType.collectAsState().value != null
                         AnimatedPasaDice(
                             diceValue = state.lastDiceValue,
                             isRolling = isRolling,
                             accentColor = activeColor,
                             enabled = !state.hasRolled && !isRolling && !state.isGameOver,
                             testTag = "ludo_dice_button",
+                            isActive = !state.isGameOver && !rulebookOpen,
                             onClick = { viewModel.onRollLudoDice(context) }
                         )
                     }

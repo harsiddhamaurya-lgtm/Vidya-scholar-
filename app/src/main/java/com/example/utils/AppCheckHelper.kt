@@ -11,17 +11,20 @@ import com.google.firebase.appcheck.debug.DebugAppCheckProviderFactory
 object AppCheckHelper {
     private const val TAG = "AppCheckHelper"
 
+    @Volatile
+    private var configured = false
+
     fun configureAppCheck(context: Context, intent: Intent?) {
+        if (configured) return
         try {
             val firebaseAppCheck = Firebase.appCheck
-            
-            // For development, use DebugAppCheckProviderFactory
             firebaseAppCheck.installAppCheckProviderFactory(
                 DebugAppCheckProviderFactory.getInstance()
             )
+            configured = true
             Log.d(TAG, "Initialized Debug App Check Provider Factory")
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to initialize App Check", e)
+        } catch (t: Throwable) {
+            Log.e(TAG, "Failed to initialize App Check", t)
         }
     }
 }
