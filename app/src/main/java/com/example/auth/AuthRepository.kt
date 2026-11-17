@@ -11,19 +11,25 @@ import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.stateIn
 
 class AuthRepository(
-    private val auth: FirebaseAuth = FirebaseAuth.getInstance()
+    private val auth: FirebaseAuth? = runCatching { FirebaseAuth.getInstance() }.getOrNull()
 ) {
     val currentUser: FirebaseUser?
-        get() = auth.currentUser
+        get() = auth?.currentUser
 
     fun observeAuthState(): Flow<FirebaseUser?> = callbackFlow {
-        val listener = FirebaseAuth.AuthStateListener { firebaseAuth ->
-            trySend(firebaseAuth.currentUser)
+        val firebaseAuth = auth
+        if (firebaseAuth == null) {
+            trySend(null)
+            awaitClose { }
+            return@callbackFlow
         }
-        auth.addAuthStateListener(listener)
-        trySend(auth.currentUser)
+        val listener = FirebaseAuth.AuthStateListener { instance ->
+            trySend(instance.currentUser)
+        }
+        firebaseAuth.addAuthStateListener(listener)
+        trySend(firebaseAuth.currentUser)
         awaitClose {
-            auth.removeAuthStateListener(listener)
+            firebaseAuth.removeAuthStateListener(listener)
         }
     }
 
@@ -31,10 +37,10 @@ class AuthRepository(
         observeAuthState().stateIn(
             scope = scope,
             started = SharingStarted.Eagerly,
-            initialValue = auth.currentUser
+            initialValue = auth?.currentUser
         )
 
     fun signOut() {
-        auth.signOut()
+        auth?.signOut()
     }
 }

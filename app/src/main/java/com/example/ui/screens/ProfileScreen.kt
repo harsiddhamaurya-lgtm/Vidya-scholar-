@@ -11,6 +11,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -574,7 +575,7 @@ private fun ChangeVidyaIdDialog(
 ) {
     val palette = LocalIndoPalette.current
     val context = LocalContext.current
-    val availability by authViewModel.vidyaAvailability.collectAsState()
+    val availability by authViewModel.vidyaAvailability.collectAsStateWithLifecycle()
     var handle by remember(profile.vidyaHandle) {
         mutableStateOf(profile.vidyaHandle.ifBlank { VidyaIdFormatter.suggestHandle(profile.name, profile.email) })
     }
@@ -652,6 +653,10 @@ private fun ChangeVidyaIdDialog(
                         discriminator = code,
                         avatarSpec = profile.toAvatarSpec(),
                         focusRealm = profile.focusRealm,
+                        standardId = profile.standardId,
+                        streamId = profile.streamId,
+                        batchType = profile.batchType,
+                        preferredLanguage = profile.preferredLanguage,
                         onError = { msg -> errorText = msg }
                     )
                     Toast.makeText(context, "Vidya ID updated", Toast.LENGTH_SHORT).show()

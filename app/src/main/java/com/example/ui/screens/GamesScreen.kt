@@ -14,6 +14,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -54,9 +55,9 @@ fun GamesScreen(
     userProfile: UserProfile? = null,
     gamesViewModel: GamesViewModel = viewModel()
 ) {
-    val activeGame by gamesViewModel.activeGame.collectAsState()
-    val selectedGameForSetup by gamesViewModel.selectedGameForSetup.collectAsState()
-    val rulebookGameType by gamesViewModel.rulebookGameType.collectAsState()
+    val activeGame by gamesViewModel.activeGame.collectAsStateWithLifecycle()
+    val selectedGameForSetup by gamesViewModel.selectedGameForSetup.collectAsStateWithLifecycle()
+    val rulebookGameType by gamesViewModel.rulebookGameType.collectAsStateWithLifecycle()
     var showBadgeSection by remember { mutableStateOf(false) }
     val context = LocalContext.current
 
@@ -167,8 +168,8 @@ private fun KhelLobbyScreen(
     onOpenBadges: () -> Unit
 ) {
     val palette = LocalIndoPalette.current
-    val allStats by gamesViewModel.allStats.collectAsState()
-    val allBadges by gamesViewModel.allBadges.collectAsState()
+    val allStats by gamesViewModel.allStats.collectAsStateWithLifecycle()
+    val allBadges by gamesViewModel.allBadges.collectAsStateWithLifecycle()
 
     val totalWins = allStats.sumOf { it.matchesWon }
     val totalPlayed = allStats.sumOf { it.matchesPlayed }

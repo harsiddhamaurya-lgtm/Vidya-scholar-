@@ -11,6 +11,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -34,7 +35,7 @@ fun MatchHistoryDialog(
     onDismiss: () -> Unit
 ) {
     val palette = LocalIndoPalette.current
-    val historyList by viewModel.getMatchHistoryForGame(gameType.name).collectAsState(initial = emptyList())
+    val historyList by viewModel.getMatchHistoryForGame(gameType.name).collectAsStateWithLifecycle(initialValue = emptyList())
 
     val (secondaryBg, accentColor) = when (gameType) {
         GameType.SHATRANJ -> Pair(palette.secondaryTerracotta, palette.accentSaffron)

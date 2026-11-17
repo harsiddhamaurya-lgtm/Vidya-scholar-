@@ -181,6 +181,7 @@ class ScholarIdentityRepository(private val db: FirebaseFirestore) {
                 "avatarToneId" to "saffron",
                 "localAvatarPhotoPath" to "",
                 "focusRealm" to "MATHEMATICS",
+                "preferredLanguage" to "en",
                 "onboardingCompleted" to false,
                 "streak" to 1,
                 "xp" to 100,
@@ -255,7 +256,8 @@ class ScholarIdentityRepository(private val db: FirebaseFirestore) {
         focusRealm: String,
         standardId: String = "class_11",
         streamId: String = "science_pcm",
-        batchType: String = "live"
+        batchType: String = "live",
+        preferredLanguage: String = "en"
     ): Result<UserProfile> {
         val normalizedHandle = VidyaIdFormatter.normalizeHandle(handle)
         if (!VidyaIdFormatter.isValidHandle(normalizedHandle)) {
@@ -347,6 +349,7 @@ class ScholarIdentityRepository(private val db: FirebaseFirestore) {
                     "standardId" to standardId,
                     "streamId" to streamId,
                     "batchType" to batchType,
+                    "preferredLanguage" to preferredLanguage.ifBlank { "en" }.take(12),
                     "completedStandards" to emptyList<String>(),
                     "onboardingCompleted" to true,
                     "streak" to currentStreak,
@@ -386,6 +389,7 @@ class ScholarIdentityRepository(private val db: FirebaseFirestore) {
                     standardId = standardId,
                     streamId = streamId,
                     batchType = batchType,
+                    preferredLanguage = preferredLanguage.ifBlank { "en" }.take(12),
                     completedStandards = emptyList(),
                     onboardingCompleted = true,
                     streak = currentStreak,

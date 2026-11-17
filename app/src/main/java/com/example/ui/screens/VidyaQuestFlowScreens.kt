@@ -51,7 +51,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -100,7 +100,7 @@ fun WindingQuestMapView(
     BackHandler { onBack() }
     val palette = LocalIndoPalette.current
     val context = LocalContext.current
-    val completedIds by vidyaViewModel.completedLevelIds.collectAsState()
+    val completedIds by vidyaViewModel.completedLevelIds.collectAsStateWithLifecycle()
     val (currentLevelNum, masteryFrac) = vidyaViewModel.getRealmProgress(realm, completedIds)
     var showMenu by remember { mutableStateOf(false) }
     var lockedNotice by remember { mutableStateOf<String?>(null) }
@@ -370,8 +370,8 @@ fun LevelQuestRunnerScreen(
     BackHandler { onBack() }
     val palette = LocalIndoPalette.current
     val context = LocalContext.current
-    val completedIds by vidyaViewModel.completedLevelIds.collectAsState()
-    val savedNoteIds by vidyaViewModel.savedNoteLevelIds.collectAsState()
+    val completedIds by vidyaViewModel.completedLevelIds.collectAsStateWithLifecycle()
+    val savedNoteIds by vidyaViewModel.savedNoteLevelIds.collectAsStateWithLifecycle()
     val alreadyCompleted = completedIds.contains(level.id)
     val isSaved = savedNoteIds.contains(level.id)
 
@@ -979,8 +979,8 @@ fun SavedNotesArchiveView(
 ) {
     BackHandler { onBack() }
     val palette = LocalIndoPalette.current
-    val savedIds by vidyaViewModel.savedNoteLevelIds.collectAsState()
-    val completedIds by vidyaViewModel.completedLevelIds.collectAsState()
+    val savedIds by vidyaViewModel.savedNoteLevelIds.collectAsStateWithLifecycle()
+    val completedIds by vidyaViewModel.completedLevelIds.collectAsStateWithLifecycle()
     val scrolls = remember(realm, savedIds, completedIds) {
         realm.levels.filter { savedIds.contains(it.id) || completedIds.contains(it.id) }
     }
@@ -1099,7 +1099,7 @@ fun AnsweredQuestionsLogView(
 ) {
     BackHandler { onBack() }
     val palette = LocalIndoPalette.current
-    val allLogs by vidyaViewModel.answeredLogs.collectAsState()
+    val allLogs by vidyaViewModel.answeredLogs.collectAsStateWithLifecycle()
     val realmLogs = remember(allLogs, realm.realmId) {
         allLogs.filter { it.realmId == realm.realmId }
     }

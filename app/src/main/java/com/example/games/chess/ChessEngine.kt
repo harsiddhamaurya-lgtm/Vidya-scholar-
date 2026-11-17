@@ -362,33 +362,31 @@ object ChessEngine {
 
     // Vidyut Bot AI: Native C++ 3-ply Alpha-Beta Search (with Kotlin fallback for JVM unit tests)
     fun computeBotMove(state: ChessGameState, difficulty: String): ChessMove? {
-        if (com.example.utils.NativeCoreBridge.isAvailable()) {
-            val flatBoard = IntArray(64)
-            for (r in 0..7) {
-                for (c in 0..7) {
-                    val p = state.board[r][c] ?: continue
-                    val code = when (p.type) {
-                        PieceType.PAWN -> 1
-                        PieceType.KNIGHT -> 2
-                        PieceType.BISHOP -> 3
-                        PieceType.ROOK -> 4
-                        PieceType.QUEEN -> 5
-                        PieceType.KING -> 6
-                    }
-                    flatBoard[r * 8 + c] = if (p.color == PieceColor.WHITE) code else -code
+        val flatBoard = IntArray(64)
+        for (r in 0..7) {
+            for (c in 0..7) {
+                val p = state.board[r][c] ?: continue
+                val code = when (p.type) {
+                    PieceType.PAWN -> 1
+                    PieceType.KNIGHT -> 2
+                    PieceType.BISHOP -> 3
+                    PieceType.ROOK -> 4
+                    PieceType.QUEEN -> 5
+                    PieceType.KING -> 6
                 }
+                flatBoard[r * 8 + c] = if (p.color == PieceColor.WHITE) code else -code
             }
-            val turnSide = if (state.currentTurn == PieceColor.WHITE) 1 else -1
-            val diffCode = if (difficulty == "EASY") 0 else 1
-            val encoded = com.example.utils.NativeCoreBridge.nativeComputeChessBotMove(flatBoard, turnSide, diffCode)
-            if (encoded != -1) {
-                val fr = (encoded ushr 24) and 0xFF
-                val fc = (encoded ushr 16) and 0xFF
-                val tr = (encoded ushr 8) and 0xFF
-                val tc = encoded and 0xFF
-                if (fr in 0..7 && fc in 0..7 && tr in 0..7 && tc in 0..7) {
-                    return ChessMove(Position(fr, fc), Position(tr, tc), state.board[tr][tc])
-                }
+        }
+        val turnSide = if (state.currentTurn == PieceColor.WHITE) 1 else -1
+        val diffCode = if (difficulty == "EASY") 0 else 1
+        val encoded = com.example.utils.NativeCoreBridge.computeChessBotMove(flatBoard, turnSide, diffCode)
+        if (encoded != null) {
+            val fr = (encoded ushr 24) and 0xFF
+            val fc = (encoded ushr 16) and 0xFF
+            val tr = (encoded ushr 8) and 0xFF
+            val tc = encoded and 0xFF
+            if (fr in 0..7 && fc in 0..7 && tr in 0..7 && tc in 0..7) {
+                return ChessMove(Position(fr, fc), Position(tr, tc), state.board[tr][tc])
             }
         }
 

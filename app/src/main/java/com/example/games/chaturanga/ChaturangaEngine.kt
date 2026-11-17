@@ -380,7 +380,7 @@ object ChaturangaEngine {
         return current
     }
 
-    // Bot AI move selection
+    // Bot AI move selection routed to C++ native evaluator
     fun chooseBotMove(state: ChaturangaState): ChaturangaMove? {
         val movablePositions = getMovablePieces(state)
         if (movablePositions.isEmpty()) return null
@@ -394,15 +394,19 @@ object ChaturangaEngine {
         }
         if (candidateMoves.isEmpty()) return null
 
-        // 1. Can we capture a King?
-        val kingCaptures = candidateMoves.filter { it.captured?.type == ChaturangaPieceType.RAJA }
-        if (kingCaptures.isNotEmpty()) return kingCaptures.first()
+        val capturedPoints = IntArray(candidateMoves.size) { candidateMoves[it].captured?.type?.points ?: 0 }
+        val capturedIsRaja = BooleanArray(candidateMoves.size) {
+            candidateMoves[it].captured?.type == ChaturangaPieceType.RAJA
+        }
+        val toRows = IntArray(candidateMoves.size) { candidateMoves[it].to.row }
+        val toCols = IntArray(candidateMoves.size) { candidateMoves[it].to.col }
 
-        // 2. Can we capture any valuable piece?
-        val valuableCaptures = candidateMoves.filter { it.captured != null }.sortedByDescending { it.captured?.type?.points ?: 0 }
-        if (valuableCaptures.isNotEmpty()) return valuableCaptures.first()
-
-        // 3. Otherwise pick a random valid move
-        return candidateMoves.random()
+        val bestIdx = com.example.utils.NativeCoreBridge.chooseChaturangaBestMove(
+            capturedPoints = capturedPoints,
+            capturedIsRaja = capturedIsRaja,
+            toRows = toRows,
+            toCols = toCols
+        )
+        return candidateMoves.getOrElse(bestIdx) { candidateMoves.first() }
     }
 }

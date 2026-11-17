@@ -25,6 +25,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -72,8 +73,8 @@ fun MessagingLandingScreen(
     chatViewModel: ChatViewModel,
     onNavigateToChat: (String) -> Unit
 ) {
-    val chats by chatViewModel.chats.collectAsState()
-    val liveSabhas by chatViewModel.liveSabhas.collectAsState()
+    val chats by chatViewModel.chats.collectAsStateWithLifecycle()
+    val liveSabhas by chatViewModel.liveSabhas.collectAsStateWithLifecycle()
     val palette = LocalIndoPalette.current
     val context = LocalContext.current
 
@@ -1206,7 +1207,7 @@ fun ChatDetailScreen(
     chatViewModel: ChatViewModel,
     onBack: () -> Unit
 ) {
-    val messages by chatViewModel.messages.collectAsState()
+    val messages by chatViewModel.messages.collectAsStateWithLifecycle()
     var inputText by remember { mutableStateOf("") }
     val palette = LocalIndoPalette.current
     val effectiveSender = senderId.ifBlank { "demo_student_123" }

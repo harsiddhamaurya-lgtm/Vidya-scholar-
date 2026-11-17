@@ -12,6 +12,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -66,7 +67,7 @@ fun GameHubScreen(
     val context = LocalContext.current
     val palette = LocalIndoPalette.current
     val coroutineScope = rememberCoroutineScope()
-    val allStats by viewModel.allStats.collectAsState()
+    val allStats by viewModel.allStats.collectAsStateWithLifecycle()
     val stats = allStats.find { it.gameType == gameType.name } ?: GameStatsEntity(gameType = gameType.name)
 
     val (secondaryBg, accentColor) = when (gameType) {

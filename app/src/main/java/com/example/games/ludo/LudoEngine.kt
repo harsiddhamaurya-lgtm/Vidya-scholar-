@@ -176,40 +176,27 @@ object LudoEngine {
         return pool[(currentIdx + 1) % pool.size]
     }
 
-    // Bot decision making
+    // Bot decision making routed to C++ native heuristic engine
     fun chooseBotToken(movableTokens: List<LudoToken>, allTokens: List<LudoToken>, dice: Int): LudoToken? {
         if (movableTokens.isEmpty()) return null
         if (movableTokens.size == 1) return movableTokens.first()
 
-        // 1. Can we capture an opponent?
-        for (token in movableTokens) {
-            val dest = getDestinationPosition(token, dice) ?: continue
-            if (dest in 0..51 && !SAFE_ZONES.contains(dest)) {
-                val enemy = allTokens.find { it.color != token.color && it.position == dest }
-                if (enemy != null) return token
-            }
-        }
+        val activeColor = movableTokens.first().color
+        val positions = IntArray(movableTokens.size) { idx -> movableTokens[idx].position }
+        val startTracks = IntArray(movableTokens.size) { idx -> movableTokens[idx].color.startTrackIndex }
+        val enemyPositions = allTokens
+            .filter { it.color != activeColor && it.position in 0..51 }
+            .map { it.position }
+            .toIntArray()
+        val safeArr = SAFE_ZONES.toIntArray()
 
-        // 2. Can we land a token into Home (57)?
-        val homeReachers = movableTokens.filter { getDestinationPosition(it, dice) == 57 }
-        if (homeReachers.isNotEmpty()) return homeReachers.first()
-
-        // 3. Move token out of Yard if rolled 6
-        if (dice == 6) {
-            val yardToken = movableTokens.find { it.isInYard }
-            if (yardToken != null) return yardToken
-        }
-
-        // 4. Move token into Home Stretch (52..56) or Safe Zone
-        for (token in movableTokens) {
-            val dest = getDestinationPosition(token, dice) ?: continue
-            if (dest in 52..56 || SAFE_ZONES.contains(dest)) return token
-        }
-
-        // 5. Advance the token furthest ahead on its circuit
-        return movableTokens.maxByOrNull { t ->
-            if (t.position in 52..56) t.position
-            else (t.position - t.color.startTrackIndex + 52) % 52
-        } ?: movableTokens.first()
+        val bestIdx = com.example.utils.NativeCoreBridge.chooseLudoBestToken(
+            tokenPositions = positions,
+            tokenStartTrackIndices = startTracks,
+            enemyPositions = enemyPositions,
+            dice = dice,
+            safeZones = safeArr
+        )
+        return movableTokens.getOrElse(bestIdx) { movableTokens.first() }
     }
 }

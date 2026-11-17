@@ -53,7 +53,14 @@ import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Image
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.VolumeUp
+import android.content.pm.PackageManager
+import androidx.core.content.ContextCompat
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.RecordVoiceOver
+import com.example.ui.components.CosmosChatHistoryDialog
+import com.example.ui.components.CosmosVoiceQuizDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -64,7 +71,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -111,6 +118,7 @@ private data class CosmosQuickPrompt(
 )
 
 private val COSMOS_QUICK_PROMPTS = listOf(
+    CosmosQuickPrompt("🎙️ Voice Quiz on textbook") { _ -> "" },
     CosmosQuickPrompt("⚡ Quiz me on my current level") { active ->
         "Quiz me with 3 interactive challenge questions on my current active level: $active. Wait for my answers or guide me step-by-step!"
     },
@@ -129,14 +137,54 @@ private val COSMOS_QUICK_PROMPTS = listOf(
 fun AiTutorScreen(
     aiViewModel: AiTutorViewModel,
     vidyaViewModel: VidyaVaultViewModel = viewModel(),
-    isCosmosActive: Boolean = true
+    isCosmosActive: Boolean = true,
+    studentStandardId: String = "class_11",
+    studentStreamId: String = "science_pcm"
 ) {
-    val messages by aiViewModel.messages.collectAsState()
-    val uiState by aiViewModel.uiState.collectAsState()
-    val completedIds by vidyaViewModel.completedLevelIds.collectAsState()
+    LaunchedEffect(studentStandardId, studentStreamId) {
+        aiViewModel.syncStudentScope(studentStandardId, studentStreamId)
+    }
+
+    val messages by aiViewModel.messages.collectAsStateWithLifecycle()
+    val uiState by aiViewModel.uiState.collectAsStateWithLifecycle()
+    val isVoiceSpeaking by aiViewModel.voiceManager.isSpeaking.collectAsStateWithLifecycle()
+    val voiceRms by aiViewModel.voiceManager.currentRms.collectAsStateWithLifecycle()
+    val completedIds by vidyaViewModel.completedLevelIds.collectAsStateWithLifecycle()
+
+    val chatSessions by aiViewModel.chatSessions.collectAsStateWithLifecycle()
+    val activeSessionId by aiViewModel.activeSessionId.collectAsStateWithLifecycle()
+    val isSyncingChats by aiViewModel.isSyncingChats.collectAsStateWithLifecycle()
+    val isOnline by aiViewModel.isOnline.collectAsStateWithLifecycle()
+    val voiceQuizState by aiViewModel.voiceQuizState.collectAsStateWithLifecycle()
+    val hasOlderMessages by aiViewModel.hasOlderMessages.collectAsStateWithLifecycle()
+    val isLoadingOlder by aiViewModel.isLoadingOlder.collectAsStateWithLifecycle()
+
     val palette = LocalIndoPalette.current
     val context = LocalContext.current
     val listState = rememberLazyListState()
+
+    var showHistoryDialog by remember { mutableStateOf(false) }
+    var showVoiceQuizDialog by remember { mutableStateOf(false) }
+
+    val recordAudioPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { _ ->
+        showVoiceQuizDialog = true
+        aiViewModel.startVoiceQuiz()
+    }
+
+    val onLaunchVoiceQuiz: () -> Unit = {
+        val hasAudio = ContextCompat.checkSelfPermission(
+            context,
+            android.Manifest.permission.RECORD_AUDIO
+        ) == PackageManager.PERMISSION_GRANTED
+        if (hasAudio) {
+            showVoiceQuizDialog = true
+            aiViewModel.startVoiceQuiz()
+        } else {
+            recordAudioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+        }
+    }
 
     var inputText by remember { mutableStateOf("") }
     var attachedBitmap by remember { mutableStateOf<Bitmap?>(null) }
@@ -193,6 +241,7 @@ fun AiTutorScreen(
     }
 
     val activeMood = when {
+        isVoiceSpeaking -> CosmiumMood.SPEAKING
         transientMood == CosmiumMood.CELEBRATE -> CosmiumMood.CELEBRATE
         transientMood == CosmiumMood.SPEAKING -> CosmiumMood.SPEAKING
         uiState is AiUiState.Loading -> CosmiumMood.THINKING
@@ -202,8 +251,9 @@ fun AiTutorScreen(
     }
 
     val typingIntensity = (inputText.length.coerceAtMost(30) / 30f) * 0.45f
-    val interactionIntensity = (typingIntensity + tapIntensity + if (activeMood == CosmiumMood.SPEAKING) 0.5f else 0f)
-        .coerceIn(0f, 1.3f)
+    val rmsBoost = if (isVoiceSpeaking) (voiceRms * 0.85f).coerceIn(0.25f, 0.9f) else 0f
+    val interactionIntensity = (typingIntensity + tapIntensity + rmsBoost + if (activeMood == CosmiumMood.SPEAKING) 0.4f else 0f)
+        .coerceIn(0f, 1.4f)
 
     // Determine the student's current active level for contextual quick prompts
     val activeLevelSummary = remember(completedIds) {
@@ -264,6 +314,14 @@ fun AiTutorScreen(
                         SoundHelper.playClick(context)
                         tapIntensity = 0.85f
                         transientMood = CosmiumMood.CELEBRATE
+                    },
+                    onHistoryClick = {
+                        SoundHelper.playClick(context)
+                        showHistoryDialog = true
+                    },
+                    onVoiceQuizClick = {
+                        SoundHelper.playClick(context)
+                        onLaunchVoiceQuiz()
                     }
                 )
 
@@ -278,6 +336,31 @@ fun AiTutorScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                     contentPadding = PaddingValues(vertical = 4.dp)
                 ) {
+                    if (hasOlderMessages) {
+                        item(key = "load_older_messages") {
+                            Box(
+                                modifier = Modifier.fillMaxWidth(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                IndoToneSurface(
+                                    onClick = { aiViewModel.loadOlderMessages() },
+                                    shape = RoundedCornerShape(14.dp),
+                                    containerColor = palette.elevatedSurface,
+                                    hairlineColor = palette.goldHairline,
+                                    modifier = Modifier.testTag("cosmos_load_older_button")
+                                ) {
+                                    Text(
+                                        text = if (isLoadingOlder) "Loading earlier study notes..." else "↑ Load earlier messages",
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = palette.accentCyan
+                                    )
+                                }
+                            }
+                        }
+                    }
+
                     items(messages, key = { it.id }) { msg ->
                         when {
                             msg.id == "cosmos_welcome" -> CosmosWelcomeSanctuaryCard(
@@ -286,7 +369,13 @@ fun AiTutorScreen(
                                 interactionIntensity = interactionIntensity
                             )
                             msg.isUser -> CosmosUserBubble(msg.text)
-                            else -> CosmosAiReplyCard(msg.text)
+                            else -> CosmosAiReplyCard(
+                                message = msg,
+                                isVoiceSpeaking = isVoiceSpeaking,
+                                onSpeak = {
+                                    if (isVoiceSpeaking) aiViewModel.stopSpeaking() else aiViewModel.speakReply(msg.text)
+                                }
+                            )
                         }
                     }
 
@@ -309,7 +398,12 @@ fun AiTutorScreen(
                         IndoToneSurface(
                             onClick = {
                                 SoundHelper.playWoodyTock(context)
-                                aiViewModel.sendMessage(item.promptBuilder(activeLevelSummary))
+                                val built = item.promptBuilder(activeLevelSummary)
+                                if (built.isBlank()) {
+                                    onLaunchVoiceQuiz()
+                                } else {
+                                    aiViewModel.sendMessage(built)
+                                }
                             },
                             shape = RoundedCornerShape(16.dp),
                             containerColor = palette.elevatedSurface,
@@ -380,6 +474,32 @@ fun AiTutorScreen(
                             attachedLabel = null
                         }
                     }
+                )
+            }
+
+            if (showHistoryDialog) {
+                CosmosChatHistoryDialog(
+                    sessions = chatSessions,
+                    activeSessionId = activeSessionId,
+                    isSyncing = isSyncingChats,
+                    isOnline = isOnline,
+                    onSelectSession = { sid -> aiViewModel.selectChatSession(sid) },
+                    onNewChat = { aiViewModel.startNewChatSession() },
+                    onTogglePin = { sid, pinned -> aiViewModel.togglePinSession(sid, pinned) },
+                    onDeleteSession = { sid -> aiViewModel.deleteChatSession(sid) },
+                    onTriggerSync = { aiViewModel.triggerCloudSync() },
+                    onDismiss = { showHistoryDialog = false }
+                )
+            }
+
+            if (showVoiceQuizDialog && voiceQuizState.step != com.example.rag.VoiceQuizStep.INACTIVE) {
+                CosmosVoiceQuizDialog(
+                    state = voiceQuizState,
+                    onSubmitAnswer = { ans -> aiViewModel.submitVoiceQuizAnswer(ans) },
+                    onRetryListening = { aiViewModel.retryVoiceQuizListening() },
+                    onNextQuestion = { aiViewModel.nextVoiceQuizQuestion() },
+                    onStopQuiz = { aiViewModel.stopVoiceQuiz() },
+                    onDismiss = { showVoiceQuizDialog = false }
                 )
             }
         }
@@ -582,7 +702,9 @@ private fun CosmosHeaderCard(
     mood: CosmiumMood,
     interactionIntensity: Float,
     isCosmosActive: Boolean = true,
-    onAvatarTap: () -> Unit = {}
+    onAvatarTap: () -> Unit = {},
+    onHistoryClick: () -> Unit = {},
+    onVoiceQuizClick: () -> Unit = {}
 ) {
     val palette = LocalIndoPalette.current
     IndoToneSurface(
@@ -598,7 +720,7 @@ private fun CosmosHeaderCard(
                 .fillMaxWidth()
                 .padding(horizontal = 14.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             CelestialAstrolabeAvatar(
                 size = 64.dp,
@@ -633,6 +755,55 @@ private fun CosmosHeaderCard(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+            }
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                // Voice Quiz Button Pill
+                Surface(
+                    onClick = onVoiceQuizClick,
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color(0xFFE88D14),
+                    modifier = Modifier
+                        .minimumInteractiveComponentSize()
+                        .testTag("cosmos_voice_quiz_button")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.RecordVoiceOver,
+                            contentDescription = "Start Voice Quiz",
+                            tint = Color.White,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            text = "Quiz",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    }
+                }
+
+                // Chat History Button
+                IconButton(
+                    onClick = onHistoryClick,
+                    modifier = Modifier
+                        .minimumInteractiveComponentSize()
+                        .testTag("cosmos_history_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.History,
+                        contentDescription = "Cosmos History",
+                        tint = palette.accentCyan,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
             }
         }
     }
@@ -703,9 +874,14 @@ private fun CosmosUserBubble(text: String) {
 }
 
 @Composable
-private fun CosmosAiReplyCard(text: String) {
+private fun CosmosAiReplyCard(
+    message: ChatMessage,
+    isVoiceSpeaking: Boolean = false,
+    onSpeak: (() -> Unit)? = null
+) {
     val palette = LocalIndoPalette.current
-    val segments = remember(text) { parseCosmosSegments(text) }
+    val context = LocalContext.current
+    val segments = remember(message.text) { parseCosmosSegments(message.text) }
 
     IndoToneSurface(
         modifier = Modifier.fillMaxWidth(),
@@ -758,12 +934,76 @@ private fun CosmosAiReplyCard(text: String) {
                             }
                         }
                         is CosmosSegment.Prose -> {
-                            Text(
+                            com.example.ui.components.CosmosMathProseView(
                                 text = seg.content,
-                                style = MaterialTheme.typography.bodyMedium,
-                                lineHeight = 22.sp,
-                                color = MaterialTheme.colorScheme.onSurface
+                                textColor = MaterialTheme.colorScheme.onSurface
                             )
+                        }
+                    }
+                }
+
+                if (message.ragSources.isNotEmpty()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        message.ragSources.forEach { src ->
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = palette.elevatedSurface,
+                                border = BorderStroke(0.8.dp, palette.goldHairline)
+                            ) {
+                                Text(
+                                    text = src,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+
+                if (onSpeak != null) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Surface(
+                            onClick = {
+                                SoundHelper.playClick(context)
+                                onSpeak()
+                            },
+                            modifier = Modifier
+                                .minimumInteractiveComponentSize()
+                                .testTag("cosmos_listen_button"),
+                            shape = RoundedCornerShape(10.dp),
+                            color = palette.elevatedSurface,
+                            border = BorderStroke(1.dp, palette.goldHairline)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (isVoiceSpeaking) Icons.Default.Stop else Icons.Default.VolumeUp,
+                                    contentDescription = if (isVoiceSpeaking) "Stop Cosmium voice" else "Listen to Cosmium",
+                                    tint = palette.accentCyan,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Text(
+                                    text = if (isVoiceSpeaking) "Stop" else "Listen",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
                         }
                     }
                 }

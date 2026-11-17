@@ -25,10 +25,10 @@ jobs:
         uses: gradle/actions/setup-gradle@v3
 
       - name: Run Unit & Robolectric Tests
-        run: gradle :testDebugUnitTest
+        run: gradle :app:testDebugUnitTest
 
       - name: Build Debug APK
-        run: gradle assembleDebug
+        run: gradle :app:assembleDebug
 
       - name: Build Release App Bundle (AAB for Google Play Console)
         env:
@@ -47,13 +47,13 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: app-debug-apk
-          path: build/outputs/apk/debug/app-debug.apk
+          path: app/build/outputs/apk/debug/app-debug.apk
 
       - name: Upload Release AAB Artifact (Google Play Store Ready)
         uses: actions/upload-artifact@v4
         with:
           name: app-release-bundle
-          path: build/outputs/bundle/release/app-release.aab
+          path: app/build/outputs/bundle/release/app-release.aab
 
   # Optional Play Store automatic publishing job (triggers when tagged or manually dispatched)
   publish-to-play-store:
@@ -77,6 +77,6 @@ jobs:
         with:
           service_account_json_raw_base64: ${{ secrets.PLAY_STORE_SERVICE_ACCOUNT_JSON_BASE64 }}
           packageName: 'com.aistudio.edupulse.vbwl'
-          releaseFiles: build/outputs/bundle/release/app-release.aab
+          releaseFiles: app/build/outputs/bundle/release/app-release.aab
           track: 'internal' # Options: internal, alpha, beta, production
           inAppUpdatePriority: 3

@@ -123,6 +123,7 @@ class LocalProfileStore(context: Context) {
             put("standardId", profile.standardId)
             put("streamId", profile.streamId)
             put("batchType", profile.batchType)
+            put("preferredLanguage", profile.preferredLanguage)
             put("completedStandards", JSONArray(profile.completedStandards))
             put("onboardingCompleted", profile.onboardingCompleted)
             put("streak", profile.streak)
@@ -173,6 +174,7 @@ class LocalProfileStore(context: Context) {
                 standardId = obj.optString("standardId", "class_11"),
                 streamId = obj.optString("streamId", "science_pcm"),
                 batchType = obj.optString("batchType", "live"),
+                preferredLanguage = obj.optString("preferredLanguage", "en"),
                 completedStandards = completedStandards,
                 onboardingCompleted = obj.optBoolean("onboardingCompleted", false),
                 streak = obj.optInt("streak", 5),

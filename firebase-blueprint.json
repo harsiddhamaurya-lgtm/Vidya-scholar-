@@ -21,6 +21,11 @@
         "avatarToneId": { "type": "string", "description": "Accent color tone ID" },
         "localAvatarPhotoPath": { "type": "string", "description": "App-local file path for Photo Picker image" },
         "focusRealm": { "type": "string", "description": "Primary subject realm focus" },
+        "standardId": { "type": "string", "description": "Enrolled class standard e.g. class_11" },
+        "streamId": { "type": "string", "description": "Enrolled stream e.g. science_pcm" },
+        "batchType": { "type": "string", "description": "Learning batch modality" },
+        "preferredLanguage": { "type": "string", "description": "Preferred study & voice language ISO code" },
+        "completedStandards": { "type": "array" },
         "onboardingCompleted": { "type": "boolean", "description": "True after post-sign-in onboarding completes" },
         "streak": { "type": "integer" },
         "xp": { "type": "integer" },
@@ -141,13 +146,53 @@
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["createdBy", "participantUids", "gameType", "status", "currentTurnUid", "moveSeq", "createdAt", "updatedAt"]
+    },
+    "CosmosChatSession": {
+      "title": "CosmosChatSession",
+      "description": "Student's private offline and cloud-synced Cosmos AI conversation session with pinning and deletion support.",
+      "type": "object",
+      "properties": {
+        "sessionId": { "type": "string" },
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "standardId": { "type": "string" },
+        "streamId": { "type": "string" },
+        "isPinned": { "type": "boolean" },
+        "createdAt": { "type": "integer" },
+        "updatedAt": { "type": "integer" },
+        "lastMessageText": { "type": "string" },
+        "messageCount": { "type": "integer" },
+        "isDeleted": { "type": "boolean" }
+      },
+      "required": ["sessionId", "userId", "title"]
+    },
+    "CosmosChatMessage": {
+      "title": "CosmosChatMessage",
+      "description": "Individual message inside a Cosmos AI chat session.",
+      "type": "object",
+      "properties": {
+        "messageId": { "type": "string" },
+        "sessionId": { "type": "string" },
+        "text": { "type": "string" },
+        "isUser": { "type": "boolean" },
+        "timestamp": { "type": "integer" },
+        "ragSources": { "type": "array" }
+      },
+      "required": ["messageId", "sessionId", "text", "isUser", "timestamp"]
     }
   },
   "firestore": {
     "/users/{userId}": {
       "schema": { "$ref": "#/entities/UserProfile" },
       "description": "Owner-only scholar profile, learning progress, and identity public key."
+    },
+    "/users/{userId}/cosmos_chats/{chatId}": {
+      "schema": { "$ref": "#/entities/CosmosChatSession" },
+      "description": "Student's pinned and backed-up Cosmos AI conversation sessions."
+    },
+    "/users/{userId}/cosmos_chats/{chatId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/CosmosChatMessage" },
+      "description": "Messages inside a synced Cosmos AI conversation session."
     },
     "/vidyaIds/{vidyaKey}": {
       "schema": { "$ref": "#/entities/VidyaIdentityCard" },

@@ -14,6 +14,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -46,7 +47,7 @@ fun ChessGameView(
 ) {
     val context = LocalContext.current
     val palette = LocalIndoPalette.current
-    val state by viewModel.chessState.collectAsState()
+    val state by viewModel.chessState.collectAsStateWithLifecycle()
     val selectedPos = viewModel.selectedChessPos
     val validMoves = viewModel.validChessDestinations
     var isMuted by remember { mutableStateOf(GameMusicPlayer.isMuted) }
@@ -60,7 +61,7 @@ fun ChessGameView(
 
     val whiteName = viewModel.getPlayerName(0, "White (You)")
     val blackName = viewModel.getPlayerName(1, if (viewModel.chessMode == "BOT") "Vidyut AI" else "Black")
-    val config = viewModel.activeGameConfig.collectAsState().value
+    val config = viewModel.activeGameConfig.collectAsStateWithLifecycle().value
 
     val statusColor = when {
         state.isCheckmate -> palette.accentVermilion
@@ -364,14 +365,14 @@ private fun ShatranjBoardCanvasAndPieces(
     // 30% Matte Board Colors + Metallic Gold Frame
     val frameOuterColor = if (palette.isDark) Color(0xFF1A1512) else Color(0xFF3A2C22)
     val lightSq = when {
-        palette.isEInk -> Color(0xFFF6F3EB)
-        palette.isDark -> Color(0xFF393230) // Brushed bronze-slate matte light
-        else -> Color(0xFFEDE4D4)           // Muted ivory matte
+        palette.isEInk -> Color(0xFFFFFFFF)
+        palette.isDark -> Color(0xFF4A423E)
+        else -> Color(0xFFF6F0E6)           // High contrast bright ivory / sandstone light
     }
     val darkSq = when {
-        palette.isEInk -> Color(0xFFD9D3C5)
-        palette.isDark -> Color(0xFF212633) // Deep temple slate matte dark
-        else -> Color(0xFFC3AC94)           // Warm terracotta stone matte
+        palette.isEInk -> Color(0xFF888888)
+        palette.isDark -> Color(0xFF181D26) // Deep contrast slate dark
+        else -> Color(0xFF6B4423)           // High contrast rich walnut brown
     }
 
     Surface(
@@ -507,7 +508,11 @@ private fun ShatranjBoardCanvasAndPieces(
                         )
 
                         val glidePulse = if (isJustMoved) 1f + 0.12f * sin(PI * glideAnim.value).toFloat() else 1f
-                        val pieceTint = if (piece.color == PieceColor.WHITE) Color(0xFFFAF6EE) else Color(0xFFF59E0B)
+                        val pieceTint = if (piece.color == PieceColor.WHITE) {
+                            if (palette.isDark) Color(0xFFFFFFFF) else Color(0xFF140D08)
+                        } else {
+                            Color(0xFFF59E0B)
+                        }
 
                         Box(
                             modifier = Modifier

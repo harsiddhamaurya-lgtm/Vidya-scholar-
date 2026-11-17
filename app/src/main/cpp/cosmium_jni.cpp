@@ -2,6 +2,7 @@
 #include <string>
 #include "cosmium_renderer.h"
 #include "pasa_dice_renderer.h"
+#include "CosmiumTtsEngine.h"
 
 extern "C" {
 
@@ -141,6 +142,58 @@ Java_com_example_ui_components_PasaDiceNativeBridge_nativeDestroy(
     if (renderer) {
         renderer->destroy();
         delete renderer;
+    }
+}
+
+// --- Cosmium TTS & RMS Telemetry JNI Entry Points ---
+
+JNIEXPORT jlong JNICALL
+Java_com_example_ui_components_CosmiumTtsBridge_nativeCreate(JNIEnv* env, jobject thiz) {
+    return reinterpret_cast<jlong>(new CosmiumTtsEngine());
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_example_ui_components_CosmiumTtsBridge_nativeInit(JNIEnv* env, jobject thiz, jlong handle, jstring modelPath, jstring voicesPath, jstring tokensPath) {
+    auto* engine = reinterpret_cast<CosmiumTtsEngine*>(handle);
+    if (!engine) return JNI_FALSE;
+    const char* m = modelPath ? env->GetStringUTFChars(modelPath, nullptr) : "";
+    const char* v = voicesPath ? env->GetStringUTFChars(voicesPath, nullptr) : "";
+    const char* t = tokensPath ? env->GetStringUTFChars(tokensPath, nullptr) : "";
+    bool ok = engine->initialize(m, v, t);
+    if (modelPath) env->ReleaseStringUTFChars(modelPath, m);
+    if (voicesPath) env->ReleaseStringUTFChars(voicesPath, v);
+    if (tokensPath) env->ReleaseStringUTFChars(tokensPath, t);
+    return ok ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_ui_components_CosmiumTtsBridge_nativeSynthesize(JNIEnv* env, jobject thiz, jlong handle, jstring textStr) {
+    auto* engine = reinterpret_cast<CosmiumTtsEngine*>(handle);
+    if (engine) {
+        const char* chars = textStr ? env->GetStringUTFChars(textStr, nullptr) : "";
+        engine->synthesizeAndPlay(chars ? chars : "");
+        if (textStr) env->ReleaseStringUTFChars(textStr, chars);
+    }
+}
+
+JNIEXPORT jfloat JNICALL
+Java_com_example_ui_components_CosmiumTtsBridge_nativeGetRms(JNIEnv* env, jobject thiz, jlong handle) {
+    auto* engine = reinterpret_cast<CosmiumTtsEngine*>(handle);
+    return engine ? engine->getCurrentRms() : 0.0f;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_example_ui_components_CosmiumTtsBridge_nativeIsSpeaking(JNIEnv* env, jobject thiz, jlong handle) {
+    auto* engine = reinterpret_cast<CosmiumTtsEngine*>(handle);
+    return engine && engine->isSpeaking() ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT void JNICALL
+Java_com_example_ui_components_CosmiumTtsBridge_nativeDestroy(JNIEnv* env, jobject thiz, jlong handle) {
+    auto* engine = reinterpret_cast<CosmiumTtsEngine*>(handle);
+    if (engine) {
+        engine->destroy();
+        delete engine;
     }
 }
 

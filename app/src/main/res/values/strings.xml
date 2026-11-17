@@ -4,7 +4,9 @@
     <string name="auth_local_preview">Explore Offline (Local Preview)</string>
     <string name="onboarding_step_identity">Forge Your Vidya ID</string>
     <string name="onboarding_step_avatar">Craft Your Scholar Crest</string>
-    <string name="onboarding_step_realm">Choose Your Focus Realm</string>
+    <string name="onboarding_step_realm">Choose Course &amp; Language</string>
+    <string name="onboarding_step_offline_setup">Prepare Offline Study Guide</string>
+    <string name="onboarding_offline_downloading">Your offline AI guide is downloading...</string>
     <string name="profile_customize_avatar">Customize Avatar &amp; Frame</string>
     <string name="vidya_id_copied">Vidya ID copied to clipboard</string>
 </resources>

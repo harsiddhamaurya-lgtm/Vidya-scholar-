@@ -50,7 +50,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -105,7 +105,7 @@ fun CoursesScreen(
     vidyaViewModel: VidyaVaultViewModel = viewModel(),
     authViewModel: AuthViewModel = viewModel()
 ) {
-    val profile by authViewModel.userProfile.collectAsState()
+    val profile by authViewModel.userProfile.collectAsStateWithLifecycle()
     val standardId = profile?.standardId ?: "class_11"
     val streamId = profile?.streamId ?: "science_pcm"
     val batchType = profile?.batchType ?: "live"
@@ -198,7 +198,7 @@ private fun VidyaRealmPortalVault(
     onOpenLog: (SubjectRealm) -> Unit
 ) {
     val palette = LocalIndoPalette.current
-    val completedIds by vidyaViewModel.completedLevelIds.collectAsState()
+    val completedIds by vidyaViewModel.completedLevelIds.collectAsStateWithLifecycle()
     val standardGrade = StandardGrade.fromId(standardId)
     val academicStream = AcademicStream.fromId(streamId)
     val batch = BatchType.fromId(batchType)

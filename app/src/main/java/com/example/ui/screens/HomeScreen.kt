@@ -47,7 +47,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -99,7 +99,7 @@ fun HomeScreen(
 ) {
     val context = LocalContext.current
     val palette = LocalIndoPalette.current
-    val completedIds by vidyaViewModel.completedLevelIds.collectAsState()
+    val completedIds by vidyaViewModel.completedLevelIds.collectAsStateWithLifecycle()
 
     // Select up to 3 active realms to showcase as Mini-Quest Campaign Previews
     val resumeRealms = remember(completedIds) {

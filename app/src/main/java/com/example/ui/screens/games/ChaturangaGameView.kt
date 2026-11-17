@@ -14,6 +14,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -45,7 +46,7 @@ fun ChaturangaGameView(
 ) {
     val context = LocalContext.current
     val palette = LocalIndoPalette.current
-    val state by viewModel.chaturangaState.collectAsState()
+    val state by viewModel.chaturangaState.collectAsStateWithLifecycle()
     val selectedPos = viewModel.selectedChaturangaPos
     val validMoves = viewModel.validChaturangaDestinations
     var isMuted by remember { mutableStateOf(GameMusicPlayer.isMuted) }
@@ -61,7 +62,7 @@ fun ChaturangaGameView(
     val greenName = viewModel.getPlayerName(1, "Green")
     val yellowName = viewModel.getPlayerName(2, "Yellow")
     val blackName = viewModel.getPlayerName(3, "Blue")
-    val config = viewModel.activeGameConfig.collectAsState().value
+    val config = viewModel.activeGameConfig.collectAsStateWithLifecycle().value
 
     fun getPlayerTitle(p: ChaturangaPlayer): String {
         return when (p) {
@@ -278,7 +279,7 @@ fun ChaturangaGameView(
                             state.allowedPieceType.firstOrNull()?.title?.split(" ")?.firstOrNull()
                         } else null
 
-                        val rulebookOpen = viewModel.rulebookGameType.collectAsState().value != null
+                        val rulebookOpen = viewModel.rulebookGameType.collectAsStateWithLifecycle().value != null
                         AnimatedPasaDice(
                             diceValue = state.lastDiceValue,
                             isRolling = viewModel.isChaturangaDiceRolling,
@@ -356,14 +357,14 @@ private fun AshtapadaBoardCanvasAndPieces(
 
     val frameOuterColor = if (palette.isDark) Color(0xFF101624) else Color(0xFF332920)
     val lightSq = when {
-        palette.isEInk -> Color(0xFFF6F3EB)
-        palette.isDark -> Color(0xFF31394A)
-        else -> Color(0xFFECE3D3)
+        palette.isEInk -> Color(0xFFFFFFFF)
+        palette.isDark -> Color(0xFF4A423E)
+        else -> Color(0xFFF6F0E6)           // High contrast bright ivory / sandstone light
     }
     val darkSq = when {
-        palette.isEInk -> Color(0xFFD9D3C5)
-        palette.isDark -> Color(0xFF1C2332)
-        else -> Color(0xFFC5B19A)
+        palette.isEInk -> Color(0xFF888888)
+        palette.isDark -> Color(0xFF181D26) // Deep contrast slate dark
+        else -> Color(0xFF6B4423)           // High contrast rich walnut brown
     }
 
     // Traditional Ashtapada sacred marked squares (4 corners & 4 center squares)

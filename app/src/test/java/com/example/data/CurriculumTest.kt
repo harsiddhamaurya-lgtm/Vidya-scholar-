@@ -78,7 +78,7 @@ class CurriculumTest {
         val vidyaId = "VIDYA_TEST_123"
         val levelId = "math_l1"
 
-        repo.savePlaybackProgress(vidyaId, levelId, 120, 180, false, null)
+        repo.savePlaybackProgress(vidyaId, levelId, 120, 180, false)
         val loaded = repo.getPlaybackProgress(vidyaId, levelId)
         assertNotNull(loaded)
         assertEquals(120, loaded?.lastPositionSec)

@@ -156,7 +156,7 @@ class CurriculumRepository(private val context: Context) {
         prefs.edit().putString(key, json.toString()).apply()
 
         // Sync to cloud Firestore asynchronously when user is authenticated
-        val user = Firebase.auth.currentUser
+        val user = runCatching { Firebase.auth.currentUser }.getOrNull()
         val firestore = db
         if (user != null && firestore != null) {
             scope.launch {

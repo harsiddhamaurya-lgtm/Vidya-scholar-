@@ -411,6 +411,7 @@ class AuthViewModel(
         standardId: String = "class_11",
         streamId: String = "science_pcm",
         batchType: String = "live",
+        preferredLanguage: String = "en",
         onError: (String) -> Unit = {}
     ) {
         val current = _userProfile.value ?: return
@@ -419,6 +420,7 @@ class AuthViewModel(
             onError("Handle must be 3–16 lowercase letters, digits, or underscores.")
             return
         }
+        val cleanLang = preferredLanguage.ifBlank { "en" }.take(12)
 
         if (isOfflinePreviewMode || auth.currentUser == null) {
             val vidyaId = VidyaIdFormatter.formatVidyaId(normalizedHandle, discriminator)
@@ -439,6 +441,7 @@ class AuthViewModel(
                 standardId = standardId,
                 streamId = streamId,
                 batchType = batchType,
+                preferredLanguage = cleanLang,
                 onboardingCompleted = true
             )
             updateGateFromProfile(updated, isOffline = true)
@@ -458,7 +461,8 @@ class AuthViewModel(
                 focusRealm = focusRealm,
                 standardId = standardId,
                 streamId = streamId,
-                batchType = batchType
+                batchType = batchType,
+                preferredLanguage = cleanLang
             )
             _isLoading.value = false
             result.onSuccess { saved ->

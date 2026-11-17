@@ -62,6 +62,7 @@ data class UserProfile(
     val standardId: String = "class_11",
     val streamId: String = "science_pcm",
     val batchType: String = "live",
+    val preferredLanguage: String = "en",
     val completedStandards: List<String> = emptyList(),
     val onboardingCompleted: Boolean = false,
     val streak: Int = 5,
@@ -254,7 +255,9 @@ data class ChatMessage(
     val keyVersion: Int = 1,
     val isEncrypted: Boolean = false,
     val isUser: Boolean = false,
-    val timestamp: Long = System.currentTimeMillis()
+    val timestamp: Long = System.currentTimeMillis(),
+    val ragSources: List<String> = emptyList(),
+    val brainBadge: String? = null
 )
 
 @IgnoreExtraProperties

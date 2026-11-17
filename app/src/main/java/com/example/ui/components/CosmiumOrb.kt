@@ -94,26 +94,28 @@ fun CosmiumOrb(
 
     val combinedInteraction = (interactionIntensity + activeBurst).coerceIn(0f, 1.5f)
 
-    // Emotion-driven plasma color transitions
+    // Emotion-driven neon glowing plasma color transitions
     val targetBodyColor = when {
         palette.isEInk -> palette.accentSaffron
-        mood == CosmiumMood.CELEBRATE -> Color(0xFF4ADE80)
-        mood == CosmiumMood.ALERT -> Color(0xFFFF8A65)
-        mood == CosmiumMood.THINKING -> Color(0xFFFFCA28)
-        mood == CosmiumMood.SPEAKING -> Color(0xFFFFE46B)
-        else -> Color(0xFFFFDF5D)
+        mood == CosmiumMood.CELEBRATE -> Color(0xFF00FF88) // Neon Emerald/Mint
+        mood == CosmiumMood.ALERT -> Color(0xFFFF2A6D)     // Neon Magenta/Coral
+        mood == CosmiumMood.THINKING -> Color(0xFF00F0FF)  // Neon Cyan
+        mood == CosmiumMood.SPEAKING -> Color(0xFFFFEA00)  // Neon Electric Yellow
+        else -> Color(0xFFFFFF33)                          // Luminous Neon Gold
     }
     val targetDeepColor = when {
         palette.isEInk -> palette.accentGold
-        mood == CosmiumMood.CELEBRATE -> Color(0xFF059669)
-        mood == CosmiumMood.ALERT -> Color(0xFFE65100)
-        mood == CosmiumMood.THINKING -> Color(0xFFE69900)
-        else -> Color(0xFFE0A100)
+        mood == CosmiumMood.CELEBRATE -> Color(0xFF00B0FF) // Neon Blue Glow
+        mood == CosmiumMood.ALERT -> Color(0xFFFF5252)     // Neon Red Glow
+        mood == CosmiumMood.THINKING -> Color(0xFF7C4DFF)  // Neon Purple Glow
+        mood == CosmiumMood.SPEAKING -> Color(0xFFFF9100)  // Neon Orange Glow
+        else -> Color(0xFFFFC400)                          // Neon Amber Glow
     }
     val targetHighlightColor = when {
         palette.isEInk -> Color.White
-        mood == CosmiumMood.CELEBRATE -> Color(0xFFE6FFF2)
-        else -> Color(0xFFFFFAE0)
+        mood == CosmiumMood.CELEBRATE -> Color(0xFFB9F6CA)
+        mood == CosmiumMood.THINKING -> Color(0xFF84FFFF)
+        else -> Color(0xFFFFFF8D)
     }
 
     val bodyColor by animateColorAsState(targetBodyColor, tween(450), label = "cosmium_body_col")
@@ -202,20 +204,20 @@ fun CosmiumOrb(
             val scaleY = 1f + squishY
             val scaleX = 1f - squishY * 0.5f
 
-            // Layer 1: Soft Atmospheric Golden Halo Glow
+            // Layer 1: Soft Atmospheric Neon Halo Glow
             if (!isEInk) {
-                val auraPulse = 1f + 0.10f * sin(t * 2.0f) + combinedInteraction * 0.10f
+                val auraPulse = 1f + 0.15f * sin(t * 2.0f) + combinedInteraction * 0.15f
                 drawCircle(
                     brush = Brush.radialGradient(
                         colors = listOf(
-                            bodyColor.copy(alpha = if (mood == CosmiumMood.SPEAKING) 0.34f else 0.22f),
-                            deepColor.copy(alpha = 0.09f),
+                            bodyColor.copy(alpha = if (mood == CosmiumMood.SPEAKING) 0.55f else 0.38f),
+                            deepColor.copy(alpha = 0.18f),
                             Color.Transparent
                         ),
                         center = center,
-                        radius = baseR * 1.55f * auraPulse
+                        radius = baseR * 1.85f * auraPulse
                     ),
-                    radius = baseR * 1.55f * auraPulse,
+                    radius = baseR * 1.85f * auraPulse,
                     center = center
                 )
             }

@@ -11,6 +11,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -36,7 +37,7 @@ fun LudoGameView(
 ) {
     val context = LocalContext.current
     val palette = LocalIndoPalette.current
-    val state by viewModel.ludoState.collectAsState()
+    val state by viewModel.ludoState.collectAsStateWithLifecycle()
     val isRolling = viewModel.isDiceRolling
     var isMuted by remember { mutableStateOf(GameMusicPlayer.isMuted) }
 
@@ -62,7 +63,7 @@ fun LudoGameView(
     val greenName = viewModel.getPlayerName(1, "Green")
     val yellowName = viewModel.getPlayerName(2, "Yellow")
     val blueName = viewModel.getPlayerName(3, "Blue")
-    val config = viewModel.activeGameConfig.collectAsState().value
+    val config = viewModel.activeGameConfig.collectAsStateWithLifecycle().value
 
     fun getPlayerTitle(color: LudoColor): String {
         return when (color) {
@@ -266,7 +267,7 @@ fun LudoGameView(
                             )
                         }
 
-                        val rulebookOpen = viewModel.rulebookGameType.collectAsState().value != null
+                        val rulebookOpen = viewModel.rulebookGameType.collectAsStateWithLifecycle().value != null
                         AnimatedPasaDice(
                             diceValue = state.lastDiceValue,
                             isRolling = isRolling,

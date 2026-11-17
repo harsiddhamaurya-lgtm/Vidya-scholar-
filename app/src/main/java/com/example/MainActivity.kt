@@ -112,7 +112,7 @@ class MainActivity : ComponentActivity() {
         }
 
         setContent {
-            val themeMode by themeViewModel.themeMode.collectAsState()
+            val themeMode by themeViewModel.themeMode.collectAsStateWithLifecycle()
             val authGateState by authViewModel.authGateState.collectAsStateWithLifecycle()
 
             EduPulseTheme(themeMode = themeMode) {
@@ -130,6 +130,7 @@ class MainActivity : ComponentActivity() {
                             profile = gate.profile,
                             isOfflinePreview = gate.isOfflinePreview,
                             authViewModel = authViewModel,
+                            aiTutorViewModel = aiTutorViewModel,
                             themeViewModel = themeViewModel,
                             currentThemeMode = themeMode
                         )
@@ -183,6 +184,12 @@ private fun AuthenticatedSanctuary(
             if (!isOfflinePreview && userProfile.uid.isNotBlank() && !userProfile.uid.startsWith("demo_")) {
                 getVidyaVaultViewModel().tryFlushPendingSync()
             }
+        }
+
+        LaunchedEffect(userProfile.standardId, userProfile.streamId, userProfile.preferredLanguage) {
+            val aiVm = getAiTutorViewModel()
+            aiVm.syncStudentScope(userProfile.standardId, userProfile.streamId)
+            aiVm.setVoiceLanguage(userProfile.preferredLanguage)
         }
 
         fun navigatePagerToTab(targetTab: Int, animate: Boolean) {
@@ -437,7 +444,9 @@ private fun SanctuaryNavHost(
                         2 -> AiTutorScreen(
                             aiViewModel = remember { getAiTutorViewModel() },
                             vidyaViewModel = remember { getVidyaVaultViewModel() },
-                            isCosmosActive = (currentTab == 2 && !pagerState.isScrollInProgress)
+                            isCosmosActive = (currentTab == 2 && !pagerState.isScrollInProgress),
+                            studentStandardId = userProfile.standardId,
+                            studentStreamId = userProfile.streamId
                         )
                         3 -> MessagingLandingScreen(
                             userId = if (isOfflinePreview) "" else userProfile.uid,

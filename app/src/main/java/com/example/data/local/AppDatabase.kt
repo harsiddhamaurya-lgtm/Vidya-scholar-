@@ -3,15 +3,11 @@ package com.example.data.local
 import android.content.ContentValues
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
-import android.os.Build
-import android.util.Base64
 import android.util.Log
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
-import com.example.security.SecurePrefsFactory
-import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
-import java.security.SecureRandom
+import com.example.security.SqlCipherFactoryProvider
 
 @Database(
     entities = [GameSessionEntity::class, GameStatsEntity::class, UserBadgeEntity::class, MatchHistoryEntity::class],
@@ -53,7 +49,11 @@ abstract class AppDatabase : RoomDatabase() {
                 ENCRYPTED_DB_NAME
             ).fallbackToDestructiveMigration()
 
-            val factory = createSqlCipherFactoryOrNull(appContext)
+            val factory = SqlCipherFactoryProvider.createFactoryOrNull(
+                appContext = appContext,
+                prefsName = DB_KEY_PREFS,
+                passphraseKey = KEY_DB_PASSPHRASE
+            )
             if (factory != null) {
                 builder.openHelperFactory(factory)
                 sqlCipherEnabled = true
@@ -73,39 +73,12 @@ abstract class AppDatabase : RoomDatabase() {
             return instance
         }
 
-        private fun createSqlCipherFactoryOrNull(appContext: Context): SupportOpenHelperFactory? {
-            if (Build.FINGERPRINT.equals("robolectric", ignoreCase = true)) {
-                return null
-            }
-            return try {
-                System.loadLibrary("sqlcipher")
-                val passphrase = getOrCreateDatabasePassphrase(appContext)
-                SupportOpenHelperFactory(passphrase)
-            } catch (e: UnsatisfiedLinkError) {
-                Log.w(TAG, "SQLCipher native library unavailable in current runtime: ${e.message}")
-                null
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to initialize SQLCipher factory: ${e.message}")
-                null
-            }
-        }
-
-        internal fun getOrCreateDatabasePassphrase(appContext: Context): ByteArray {
-            val prefs = SecurePrefsFactory.getEncryptedPrefs(appContext, DB_KEY_PREFS)
-            val existingB64 = prefs.getString(KEY_DB_PASSPHRASE, null)
-            if (!existingB64.isNullOrBlank()) {
-                val decoded = runCatching { Base64.decode(existingB64, Base64.NO_WRAP) }.getOrNull()
-                if (decoded != null && decoded.size >= 32) {
-                    return decoded
-                }
-            }
-            val keyBytes = ByteArray(32)
-            SecureRandom().nextBytes(keyBytes)
-            prefs.edit()
-                .putString(KEY_DB_PASSPHRASE, Base64.encodeToString(keyBytes, Base64.NO_WRAP))
-                .commit()
-            return keyBytes
-        }
+        internal fun getOrCreateDatabasePassphrase(appContext: Context): ByteArray =
+            SqlCipherFactoryProvider.getOrCreatePassphrase(
+                appContext = appContext,
+                prefsName = DB_KEY_PREFS,
+                passphraseKey = KEY_DB_PASSPHRASE
+            )
 
         private fun migrateLegacyPlaintextDatabase(
             appContext: Context,

@@ -50,6 +50,11 @@ service cloud.firestore {
              (!('avatarToneId' in data) || (data.avatarToneId is string && data.avatarToneId.size() <= 40)) &&
              (!('localAvatarPhotoPath' in data) || (data.localAvatarPhotoPath is string && data.localAvatarPhotoPath.size() <= 400)) &&
              (!('focusRealm' in data) || (data.focusRealm is string && data.focusRealm.size() <= 32)) &&
+             (!('standardId' in data) || (data.standardId is string && data.standardId.size() <= 24)) &&
+             (!('streamId' in data) || (data.streamId is string && data.streamId.size() <= 24)) &&
+             (!('batchType' in data) || (data.batchType is string && data.batchType.size() <= 24)) &&
+             (!('preferredLanguage' in data) || (data.preferredLanguage is string && data.preferredLanguage.size() <= 16)) &&
+             (!('completedStandards' in data) || (data.completedStandards is list && data.completedStandards.size() <= 20)) &&
              (!('streak' in data) || (data.streak is int && data.streak >= 0 && data.streak <= 100000)) &&
              (!('xp' in data) || (data.xp is int && data.xp >= 0 && data.xp <= 10000000)) &&
              (!('level' in data) || (data.level is string && data.level.size() <= 40)) &&
@@ -156,6 +161,26 @@ service cloud.firestore {
              (!('winnerUid' in data) || (data.winnerUid is string && data.winnerUid.size() <= 128));
     }
 
+    function isValidCosmosChat(data) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.sessionId is string && data.sessionId.size() >= 1 && data.sessionId.size() <= 128 &&
+             data.title is string && data.title.size() <= 200 &&
+             (!('standardId' in data) || (data.standardId is string && data.standardId.size() <= 32)) &&
+             (!('streamId' in data) || (data.streamId is string && data.streamId.size() <= 32)) &&
+             (!('isPinned' in data) || data.isPinned is bool) &&
+             (!('lastMessageText' in data) || (data.lastMessageText is string && data.lastMessageText.size() <= 2000)) &&
+             (!('messageCount' in data) || (data.messageCount is int && data.messageCount >= 0)) &&
+             (!('isDeleted' in data) || data.isDeleted is bool);
+    }
+
+    function isValidCosmosMessage(data) {
+      return data.messageId is string && data.messageId.size() >= 1 && data.messageId.size() <= 128 &&
+             data.sessionId is string && data.sessionId.size() >= 1 && data.sessionId.size() <= 128 &&
+             data.text is string && data.text.size() <= 8000 &&
+             data.isUser is bool &&
+             data.timestamp is int;
+    }
+
     match /users/{userId} {
       allow get, list: if isSignedIn() && request.auth.uid == userId;
 
@@ -168,7 +193,8 @@ service cloud.firestore {
                          'uid', 'name', 'email', 'photoUrl',
                          'vidyaId', 'vidyaHandle', 'vidyaDiscriminator', 'vidyaKey', 'contactCode',
                          'avatarMode', 'avatarPresetId', 'avatarCrestId', 'avatarFrameId', 'avatarToneId', 'localAvatarPhotoPath',
-                         'focusRealm', 'onboardingCompleted',
+                         'focusRealm', 'standardId', 'streamId', 'batchType', 'preferredLanguage', 'completedStandards',
+                         'onboardingCompleted',
                          'streak', 'xp', 'level', 'hearts', 'completedLessons',
                          'publicKey', 'keyVersion',
                          'createdAt', 'updatedAt'
@@ -188,13 +214,42 @@ service cloud.firestore {
                          'name', 'photoUrl',
                          'vidyaId', 'vidyaHandle', 'vidyaDiscriminator', 'vidyaKey', 'contactCode',
                          'avatarMode', 'avatarPresetId', 'avatarCrestId', 'avatarFrameId', 'avatarToneId', 'localAvatarPhotoPath',
-                         'focusRealm', 'onboardingCompleted',
+                         'focusRealm', 'standardId', 'streamId', 'batchType', 'preferredLanguage', 'completedStandards',
+                         'onboardingCompleted',
                          'streak', 'xp', 'level', 'hearts', 'completedLessons',
                          'publicKey', 'keyVersion',
                          'updatedAt'
                        ]);
 
       allow delete: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+
+      match /cosmos_chats/{chatId} {
+        allow get, list: if isSignedIn() && request.auth.uid == userId;
+
+        allow create, update: if isSignedIn() &&
+                                 isValidId(userId) &&
+                                 isValidId(chatId) &&
+                                 request.auth.uid == userId &&
+                                 incoming().userId == userId &&
+                                 incoming().sessionId == chatId &&
+                                 isValidCosmosChat(incoming());
+
+        allow delete: if isSignedIn() && isValidId(userId) && isValidId(chatId) && request.auth.uid == userId;
+
+        match /messages/{messageId} {
+          allow get, list: if isSignedIn() && request.auth.uid == userId;
+
+          allow create, update: if isSignedIn() &&
+                                   isValidId(userId) &&
+                                   isValidId(chatId) &&
+                                   isValidId(messageId) &&
+                                   request.auth.uid == userId &&
+                                   incoming().sessionId == chatId &&
+                                   isValidCosmosMessage(incoming());
+
+          allow delete: if isSignedIn() && isValidId(userId) && isValidId(chatId) && isValidId(messageId) && request.auth.uid == userId;
+        }
+      }
     }
 
     match /vidyaIds/{vidyaKey} {

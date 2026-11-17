@@ -4,5 +4,9 @@
     <exclude domain="sharedpref" path="vidya_profile_encrypted_v1.xml" />
     <exclude domain="sharedpref" path="vidya_prefs_encrypted_v1.xml" />
     <exclude domain="sharedpref" path="vidya_sqlcipher_key_v1.xml" />
+    <exclude domain="sharedpref" path="cosmium_rag_sqlcipher_key_v1.xml" />
+    <exclude domain="sharedpref" path="cosmium_rag_room_key_v1.xml" />
     <exclude domain="database" path="vidhya_scholar_enc.db" />
+    <exclude domain="database" path="cosmium_rag_vault_enc.db" />
+    <exclude domain="database" path="rag_room_vault_enc.db" />
 </full-backup-content>
