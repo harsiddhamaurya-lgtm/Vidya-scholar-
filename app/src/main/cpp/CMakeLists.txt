@@ -14,6 +14,7 @@ add_library(cosmium_native SHARED
 
 find_library(log-lib log)
 find_library(glesv3-lib GLESv3)
+find_library(egl-lib EGL)
 find_library(android-lib android)
 find_library(z-lib z)
 
@@ -24,6 +25,7 @@ target_include_directories(cosmium_native PRIVATE
 target_link_libraries(cosmium_native
     ${log-lib}
     ${glesv3-lib}
+    ${egl-lib}
     ${android-lib}
     ${z-lib}
 )

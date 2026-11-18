@@ -14,6 +14,8 @@ import androidx.lifecycle.viewModelScope
 import com.example.R
 import com.example.data.AvatarMode
 import com.example.data.AvatarSpec
+import com.example.data.SacredQuote
+import com.example.data.SacredQuotesCatalog
 import com.example.data.UserProfile
 import com.example.data.VidyaIdentityCard
 import com.example.data.repository.ScholarIdentityRepository
@@ -81,6 +83,10 @@ class AuthViewModel(
     private val _vidyaAvailability = MutableStateFlow<VidyaAvailabilityState>(VidyaAvailabilityState.Idle)
     val vidyaAvailability: StateFlow<VidyaAvailabilityState> = _vidyaAvailability.asStateFlow()
 
+    private var fallbackQuoteIndex = -1
+    private val _currentSignInQuote = MutableStateFlow(loadNextSignInQuote())
+    val currentSignInQuote: StateFlow<SacredQuote> = _currentSignInQuote.asStateFlow()
+
     private var isOfflinePreviewMode = false
     private var profileObserverJob: Job? = null
     private var availabilityJob: Job? = null
@@ -99,6 +105,11 @@ class AuthViewModel(
         } else if (!isOfflinePreviewMode) {
             stopObservingProfile()
             _userProfile.value = null
+            if (_authGateState.value !is AuthGateState.Unauthenticated &&
+                _authGateState.value !is AuthGateState.Loading
+            ) {
+                _currentSignInQuote.value = loadNextSignInQuote()
+            }
             _authGateState.value = AuthGateState.Unauthenticated
         }
     }
@@ -610,12 +621,22 @@ class AuthViewModel(
                     auth.signOut()
                     withContext(Dispatchers.Main) {
                         _userProfile.value = null
+                        _currentSignInQuote.value = loadNextSignInQuote()
                         _authGateState.value = AuthGateState.Unauthenticated
                         onSignOutComplete()
                     }
                 }
             }
         }
+    }
+
+    private fun loadNextSignInQuote(): SacredQuote {
+        val quotes = SacredQuotesCatalog.quotes
+        val index = localProfileStore?.nextQuoteIndex(quotes.size) ?: run {
+            fallbackQuoteIndex = (fallbackQuoteIndex + 1) % quotes.size
+            fallbackQuoteIndex
+        }
+        return quotes[index.coerceIn(0, quotes.lastIndex)]
     }
 
     fun clearError() {

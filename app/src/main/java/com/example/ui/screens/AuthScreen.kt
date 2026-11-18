@@ -1,25 +1,26 @@
 package com.example.ui.screens
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.Badge
-import androidx.compose.material.icons.filled.School
+import androidx.compose.material.icons.filled.FormatQuote
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -32,16 +33,20 @@ import com.example.viewmodel.AuthViewModel
 
 @Composable
 fun AuthScreen(
-    authViewModel: AuthViewModel
+    authViewModel: AuthViewModel,
+    introFinished: Boolean = true
 ) {
     val context = LocalContext.current
     val isLoading by authViewModel.isLoading.collectAsStateWithLifecycle()
     val errorMessage by authViewModel.errorMessage.collectAsStateWithLifecycle()
+    val quote by authViewModel.currentSignInQuote.collectAsStateWithLifecycle()
     val palette = LocalIndoPalette.current
 
-    LaunchedEffect(Unit) {
-        kotlinx.coroutines.delay(250)
-        authViewModel.attemptAutoSignIn(context)
+    LaunchedEffect(introFinished) {
+        if (introFinished) {
+            kotlinx.coroutines.delay(250)
+            authViewModel.attemptAutoSignIn(context)
+        }
     }
 
     IndoAtmosphericBackdrop(ambientGlowColor = palette.accentSaffron) {
@@ -56,21 +61,18 @@ fun AuthScreen(
                 Spacer(modifier = Modifier.height(20.dp))
                 Box(
                     modifier = Modifier
-                        .size(94.dp)
-                        .clip(CircleShape)
-                        .background(
-                            Brush.linearGradient(
-                                listOf(palette.secondaryIndigo, palette.secondaryCopper)
-                            )
-                        )
-                        .border(1.dp, palette.accentGold.copy(alpha = 0.6f), CircleShape),
+                        .size(108.dp)
+                        .clip(RoundedCornerShape(26.dp))
+                        .border(1.2.dp, palette.accentGold.copy(alpha = 0.65f), RoundedCornerShape(26.dp)),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.School,
-                        contentDescription = "Vidhya Scholar Logo",
-                        tint = palette.accentSaffron,
-                        modifier = Modifier.size(48.dp)
+                    Image(
+                        painter = painterResource(id = R.drawable.ic_launcher_art),
+                        contentDescription = "Vidhya Scholar App Icon",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .testTag("auth_app_icon")
                     )
                 }
                 Spacer(modifier = Modifier.height(20.dp))
@@ -92,52 +94,54 @@ fun AuthScreen(
             }
 
             IndoToneSurface(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("auth_quote_card"),
                 shape = RoundedCornerShape(24.dp),
                 containerColor = palette.cardSurface,
                 hairlineColor = palette.goldHairline
             ) {
-                Column(
-                    modifier = Modifier.padding(20.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(IntrinsicSize.Min)
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    Box(
+                        modifier = Modifier
+                            .width(4.dp)
+                            .fillMaxHeight()
+                            .background(palette.accentSaffron)
+                    )
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(horizontal = 20.dp, vertical = 18.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(38.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(palette.secondaryCopper),
-                            contentAlignment = Alignment.Center
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Icon(Icons.Default.Badge, contentDescription = null, tint = palette.accentCyan)
+                            Icon(
+                                imageVector = Icons.Default.FormatQuote,
+                                contentDescription = null,
+                                tint = palette.accentSaffron,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Text(
+                                text = "Daily Wisdom",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 1.2.sp,
+                                color = palette.accentCyan
+                            )
                         }
                         Text(
-                            "One handle#code Vidya ID for Profile, Varta & Khel",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(38.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(palette.secondaryTerracotta),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = palette.accentSaffron)
-                        }
-                        Text(
-                            "Cosmos AI Mentor, Winding Quests & Strategy Arena",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.SemiBold,
+                            text = "“${quote.text}”",
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontFamily = FontFamily.Serif,
+                            fontStyle = FontStyle.Italic,
+                            lineHeight = 23.sp,
                             color = MaterialTheme.colorScheme.onSurface
                         )
                     }

@@ -8,6 +8,7 @@ import androidx.activity.viewModels
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -42,6 +43,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -49,10 +51,14 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.initializer
@@ -114,39 +120,90 @@ class MainActivity : ComponentActivity() {
         setContent {
             val themeMode by themeViewModel.themeMode.collectAsStateWithLifecycle()
             val authGateState by authViewModel.authGateState.collectAsStateWithLifecycle()
+            var showIntroOverlay by rememberSaveable { mutableStateOf(true) }
+            var introFinished by rememberSaveable { mutableStateOf(false) }
+            val introAlpha = remember { Animatable(if (showIntroOverlay) 1f else 0f) }
+
+            LaunchedEffect(showIntroOverlay) {
+                if (showIntroOverlay) {
+                    // Wait until the first frame of the intro graphic is rendered on screen
+                    withFrameNanos { }
+                    kotlinx.coroutines.delay(3000L)
+                    introAlpha.animateTo(
+                        targetValue = 0f,
+                        animationSpec = tween(
+                            durationMillis = 900,
+                            easing = FastOutSlowInEasing
+                        )
+                    )
+                    showIntroOverlay = false
+                    introFinished = true
+                }
+            }
 
             EduPulseTheme(themeMode = themeMode) {
-                when (val gate = authGateState) {
-                    AuthGateState.Loading -> {
-                        LazyTabSkeleton(page = 0)
+                Box(modifier = Modifier.fillMaxSize()) {
+                    when (val gate = authGateState) {
+                        AuthGateState.Loading -> {
+                            LazyTabSkeleton(page = 0)
+                        }
+
+                        AuthGateState.Unauthenticated -> {
+                            AuthScreen(
+                                authViewModel = authViewModel,
+                                introFinished = introFinished
+                            )
+                        }
+
+                        is AuthGateState.NeedsOnboarding -> {
+                            OnboardingScreen(
+                                profile = gate.profile,
+                                isOfflinePreview = gate.isOfflinePreview,
+                                authViewModel = authViewModel,
+                                aiTutorViewModel = aiTutorViewModel,
+                                themeViewModel = themeViewModel,
+                                currentThemeMode = themeMode
+                            )
+                        }
+
+                        is AuthGateState.Authenticated -> {
+                            AuthenticatedSanctuary(
+                                userProfile = gate.profile,
+                                isOfflinePreview = gate.isOfflinePreview,
+                                authViewModel = authViewModel,
+                                themeViewModel = themeViewModel,
+                                getAiTutorViewModel = { aiTutorViewModel },
+                                getChatViewModel = { chatViewModel },
+                                getVidyaVaultViewModel = { vidyaVaultViewModel },
+                                themeMode = themeMode
+                            )
+                        }
                     }
 
-                    AuthGateState.Unauthenticated -> {
-                        AuthScreen(authViewModel = authViewModel)
-                    }
-
-                    is AuthGateState.NeedsOnboarding -> {
-                        OnboardingScreen(
-                            profile = gate.profile,
-                            isOfflinePreview = gate.isOfflinePreview,
-                            authViewModel = authViewModel,
-                            aiTutorViewModel = aiTutorViewModel,
-                            themeViewModel = themeViewModel,
-                            currentThemeMode = themeMode
-                        )
-                    }
-
-                    is AuthGateState.Authenticated -> {
-                        AuthenticatedSanctuary(
-                            userProfile = gate.profile,
-                            isOfflinePreview = gate.isOfflinePreview,
-                            authViewModel = authViewModel,
-                            themeViewModel = themeViewModel,
-                            getAiTutorViewModel = { aiTutorViewModel },
-                            getChatViewModel = { chatViewModel },
-                            getVidyaVaultViewModel = { vidyaVaultViewModel },
-                            themeMode = themeMode
-                        )
+                    if (showIntroOverlay || introAlpha.value > 0f) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .zIndex(10f)
+                                .graphicsLayer { alpha = introAlpha.value }
+                                .background(Color(0xFFF6F6F3))
+                                .pointerInput(Unit) {
+                                    awaitPointerEventScope {
+                                        while (true) {
+                                            awaitPointerEvent()
+                                        }
+                                    }
+                                }
+                                .testTag("intro_splash_overlay"),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Image(
+                                painter = painterResource(id = R.drawable.intro_splash),
+                                contentDescription = "Vidhya Scholar Intro",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
                     }
                 }
             }
@@ -444,7 +501,7 @@ private fun SanctuaryNavHost(
                         2 -> AiTutorScreen(
                             aiViewModel = remember { getAiTutorViewModel() },
                             vidyaViewModel = remember { getVidyaVaultViewModel() },
-                            isCosmosActive = (currentTab == 2 && !pagerState.isScrollInProgress),
+                            isCosmosActive = (currentTab == 2),
                             studentStandardId = userProfile.standardId,
                             studentStreamId = userProfile.streamId
                         )

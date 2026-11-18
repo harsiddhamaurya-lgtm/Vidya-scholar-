@@ -1,9 +1,19 @@
 #include "cosmium_renderer.h"
+#include <EGL/egl.h>
 #include <GLES3/gl3.h>
 #include <android/log.h>
 #include <cmath>
 #include <cstdlib>
 #include <algorithm>
+
+static inline bool hasCurrentEglContext() {
+    return eglGetCurrentContext() != EGL_NO_CONTEXT;
+}
+
+static inline bool hasDrawableEglContext() {
+    return eglGetCurrentContext() != EGL_NO_CONTEXT &&
+           eglGetCurrentSurface(EGL_DRAW) != EGL_NO_SURFACE;
+}
 
 #define LOG_TAG "CosmiumNative"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -401,13 +411,27 @@ static void cacheFluidUniforms(FluidProgramUniforms& target) {
 }
 
 void CosmiumRenderer::cleanupShaders() {
-    if (highLodProgram_.program) { glDeleteProgram(highLodProgram_.program); highLodProgram_.program = 0; }
-    if (lowLodProgram_.program) { glDeleteProgram(lowLodProgram_.program); lowLodProgram_.program = 0; }
-    if (unlitShaderProgram_) { glDeleteProgram(unlitShaderProgram_); unlitShaderProgram_ = 0; }
-    if (emberInstancedProgram_) { glDeleteProgram(emberInstancedProgram_); emberInstancedProgram_ = 0; }
+    const bool hasCtx = hasCurrentEglContext();
+    if (highLodProgram_.program) {
+        if (hasCtx) glDeleteProgram(highLodProgram_.program);
+        highLodProgram_.program = 0;
+    }
+    if (lowLodProgram_.program) {
+        if (hasCtx) glDeleteProgram(lowLodProgram_.program);
+        lowLodProgram_.program = 0;
+    }
+    if (unlitShaderProgram_) {
+        if (hasCtx) glDeleteProgram(unlitShaderProgram_);
+        unlitShaderProgram_ = 0;
+    }
+    if (emberInstancedProgram_) {
+        if (hasCtx) glDeleteProgram(emberInstancedProgram_);
+        emberInstancedProgram_ = 0;
+    }
 }
 
 void CosmiumRenderer::setupShaders() {
+    if (!hasCurrentEglContext()) return;
     cleanupShaders();
 
     highLodProgram_.program = linkProgram(kHighLodVertexShaderSrc, kHighLodFragmentShaderSrc);
@@ -478,23 +502,34 @@ static void generateSphereMesh(
 }
 
 void CosmiumRenderer::cleanupMeshes() {
-    auto deleteMesh = [](GLuint& vao, GLuint& vbo, GLuint& ebo) {
-        if (vao) { glDeleteVertexArrays(1, &vao); vao = 0; }
-        if (vbo) { glDeleteBuffers(1, &vbo); vbo = 0; }
-        if (ebo) { glDeleteBuffers(1, &ebo); ebo = 0; }
+    const bool hasCtx = hasCurrentEglContext();
+    auto deleteMesh = [hasCtx](GLuint& vao, GLuint& vbo, GLuint& ebo) {
+        if (vao) {
+            if (hasCtx) glDeleteVertexArrays(1, &vao);
+            vao = 0;
+        }
+        if (vbo) {
+            if (hasCtx) glDeleteBuffers(1, &vbo);
+            vbo = 0;
+        }
+        if (ebo) {
+            if (hasCtx) glDeleteBuffers(1, &ebo);
+            ebo = 0;
+        }
     };
     deleteMesh(mainSphereVao_, mainSphereVbo_, mainSphereEbo_);
     deleteMesh(outerLayerVao_, outerLayerVbo_, outerLayerEbo_);
     deleteMesh(coreVao_, coreVbo_, coreEbo_);
     deleteMesh(emberVao_, emberVbo_, emberEbo_);
     if (emberInstanceVbo_) {
-        glDeleteBuffers(1, &emberInstanceVbo_);
+        if (hasCtx) glDeleteBuffers(1, &emberInstanceVbo_);
         emberInstanceVbo_ = 0;
     }
     deleteMesh(ringVao_, ringVbo_, ringEbo_);
 }
 
 void CosmiumRenderer::setupMeshes(bool lowLod) {
+    if (!hasCurrentEglContext()) return;
     cleanupMeshes();
 
     int res = lowLod ? 56 : 128;
@@ -568,6 +603,10 @@ void CosmiumRenderer::setupMeshes(bool lowLod) {
 }
 
 void CosmiumRenderer::init(int width, int height) {
+    if (!hasDrawableEglContext()) {
+        initialized_ = false;
+        return;
+    }
     setupShaders();
 
     const char* rendererStr = reinterpret_cast<const char*>(glGetString(GL_RENDERER));
@@ -588,9 +627,10 @@ void CosmiumRenderer::init(int width, int height) {
 }
 
 void CosmiumRenderer::resize(int width, int height) {
+    if (!initialized_ || !hasDrawableEglContext()) return;
     if (width > 0 && height > 0) {
         glViewport(0, 0, width, height);
-        aspect_ = static_cast<float>(width) / static_cast<float>(height);
+        aspect_ = std::max(0.01f, static_cast<float>(width) / static_cast<float>(height));
     }
 }
 
@@ -660,7 +700,7 @@ static void orthoMatrix(float* m, float left, float right, float bottom, float t
 }
 
 void CosmiumRenderer::render(float dt, const std::string& state, float interactionIntensity, float moodTurbulence, int colorHex) {
-    if (!initialized_) return;
+    if (!initialized_ || !hasDrawableEglContext()) return;
 
     totalTime_ += dt;
     float time = totalTime_;

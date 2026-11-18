@@ -102,6 +102,38 @@ class LocalProfileStore(context: Context) {
         return appPrefs.getString(KEY_THEME_MODE, defaultMode) ?: defaultMode
     }
 
+    @Synchronized
+    fun nextQuoteIndex(deckSize: Int): Int {
+        if (deckSize <= 1) return 0
+        val lastIndex = appPrefs.getInt(KEY_LAST_QUOTE_INDEX, -1)
+        val rawDeck = appPrefs.getString(KEY_QUOTE_DECK, "").orEmpty()
+        val remaining = rawDeck
+            .split(",")
+            .mapNotNull { it.trim().toIntOrNull() }
+            .filter { it in 0 until deckSize }
+            .toMutableList()
+
+        if (remaining.isEmpty()) {
+            val freshDeck = (0 until deckSize).shuffled().toMutableList()
+            if (freshDeck.first() == lastIndex && freshDeck.size > 1) {
+                val swapIdx = 1 + (freshDeck.size - 1).let { count ->
+                    if (count <= 1) 0 else kotlin.random.Random.nextInt(count)
+                }
+                val tmp = freshDeck[0]
+                freshDeck[0] = freshDeck[swapIdx]
+                freshDeck[swapIdx] = tmp
+            }
+            remaining.addAll(freshDeck)
+        }
+
+        val chosen = remaining.removeAt(0)
+        appPrefs.edit()
+            .putInt(KEY_LAST_QUOTE_INDEX, chosen)
+            .putString(KEY_QUOTE_DECK, remaining.joinToString(","))
+            .apply()
+        return chosen
+    }
+
     private fun serializeProfile(profile: UserProfile): String {
         val obj = JSONObject().apply {
             put("uid", profile.uid)
@@ -202,5 +234,7 @@ class LocalProfileStore(context: Context) {
         private const val KEY_PENDING_PROGRESS_PREFIX = "pending_progress_"
         private const val KEY_LAST_UID = "last_active_uid"
         private const val KEY_THEME_MODE = "theme_mode"
+        private const val KEY_LAST_QUOTE_INDEX = "signin_last_quote_index"
+        private const val KEY_QUOTE_DECK = "signin_quote_deck"
     }
 }

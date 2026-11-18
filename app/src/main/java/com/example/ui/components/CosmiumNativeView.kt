@@ -54,6 +54,67 @@ object CosmiumNativeBridge {
     @JvmStatic external fun nativeDestroy(handle: Long)
 }
 
+internal class SafeTranslucentEglConfigChooser : GLSurfaceView.EGLConfigChooser {
+    override fun chooseConfig(egl: EGL10, display: EGLDisplay): EGLConfig {
+        val eglOpenGlEs3Bit = 0x0040
+        val eglOpenGlEs2Bit = 0x0004
+        val candidates = listOf(
+            intArrayOf(
+                EGL10.EGL_SURFACE_TYPE, EGL10.EGL_WINDOW_BIT,
+                EGL10.EGL_RED_SIZE, 8,
+                EGL10.EGL_GREEN_SIZE, 8,
+                EGL10.EGL_BLUE_SIZE, 8,
+                EGL10.EGL_ALPHA_SIZE, 8,
+                EGL10.EGL_DEPTH_SIZE, 16,
+                EGL10.EGL_SAMPLE_BUFFERS, 1,
+                EGL10.EGL_SAMPLES, 4,
+                EGL10.EGL_RENDERABLE_TYPE, eglOpenGlEs3Bit,
+                EGL10.EGL_NONE
+            ),
+            intArrayOf(
+                EGL10.EGL_SURFACE_TYPE, EGL10.EGL_WINDOW_BIT,
+                EGL10.EGL_RED_SIZE, 8,
+                EGL10.EGL_GREEN_SIZE, 8,
+                EGL10.EGL_BLUE_SIZE, 8,
+                EGL10.EGL_ALPHA_SIZE, 8,
+                EGL10.EGL_DEPTH_SIZE, 16,
+                EGL10.EGL_RENDERABLE_TYPE, eglOpenGlEs3Bit,
+                EGL10.EGL_NONE
+            ),
+            intArrayOf(
+                EGL10.EGL_SURFACE_TYPE, EGL10.EGL_WINDOW_BIT,
+                EGL10.EGL_RED_SIZE, 8,
+                EGL10.EGL_GREEN_SIZE, 8,
+                EGL10.EGL_BLUE_SIZE, 8,
+                EGL10.EGL_ALPHA_SIZE, 8,
+                EGL10.EGL_DEPTH_SIZE, 16,
+                EGL10.EGL_RENDERABLE_TYPE, eglOpenGlEs2Bit,
+                EGL10.EGL_NONE
+            ),
+            intArrayOf(
+                EGL10.EGL_SURFACE_TYPE, EGL10.EGL_WINDOW_BIT,
+                EGL10.EGL_RED_SIZE, 8,
+                EGL10.EGL_GREEN_SIZE, 8,
+                EGL10.EGL_BLUE_SIZE, 8,
+                EGL10.EGL_ALPHA_SIZE, 8,
+                EGL10.EGL_NONE
+            ),
+            intArrayOf(EGL10.EGL_NONE)
+        )
+        val numConfig = IntArray(1)
+        for (spec in candidates) {
+            if (egl.eglChooseConfig(display, spec, null, 0, numConfig) && numConfig[0] > 0) {
+                val configs = arrayOfNulls<EGLConfig>(numConfig[0])
+                if (egl.eglChooseConfig(display, spec, configs, configs.size, numConfig)) {
+                    val best = configs.filterNotNull().firstOrNull()
+                    if (best != null) return best
+                }
+            }
+        }
+        throw IllegalArgumentException("No suitable EGLConfig available")
+    }
+}
+
 class CosmiumGLSurfaceView(context: Context) : GLSurfaceView(context) {
     private val renderer: CosmiumRendererWrapper
 
@@ -66,7 +127,7 @@ class CosmiumGLSurfaceView(context: Context) : GLSurfaceView(context) {
     init {
         CosmiumNativeBridge.ensureLoaded()
         setEGLContextClientVersion(3)
-        setEGLConfigChooser(SafeTranslucentConfigChooser())
+        setEGLConfigChooser(SafeTranslucentEglConfigChooser())
         holder.setFormat(PixelFormat.TRANSLUCENT)
         setZOrderOnTop(true)
         preserveEGLContextOnPause = true
@@ -75,93 +136,40 @@ class CosmiumGLSurfaceView(context: Context) : GLSurfaceView(context) {
         renderMode = RENDERMODE_CONTINUOUSLY
     }
 
-    private class SafeTranslucentConfigChooser : EGLConfigChooser {
-        override fun chooseConfig(egl: EGL10, display: EGLDisplay): EGLConfig {
-            val eglOpenGlEs3Bit = 0x0040
-            val eglOpenGlEs2Bit = 0x0004
-            val candidates = listOf(
-                intArrayOf(
-                    EGL10.EGL_RED_SIZE, 8,
-                    EGL10.EGL_GREEN_SIZE, 8,
-                    EGL10.EGL_BLUE_SIZE, 8,
-                    EGL10.EGL_ALPHA_SIZE, 8,
-                    EGL10.EGL_DEPTH_SIZE, 16,
-                    EGL10.EGL_SAMPLE_BUFFERS, 1,
-                    EGL10.EGL_SAMPLES, 4,
-                    EGL10.EGL_RENDERABLE_TYPE, eglOpenGlEs3Bit,
-                    EGL10.EGL_NONE
-                ),
-                intArrayOf(
-                    EGL10.EGL_RED_SIZE, 8,
-                    EGL10.EGL_GREEN_SIZE, 8,
-                    EGL10.EGL_BLUE_SIZE, 8,
-                    EGL10.EGL_ALPHA_SIZE, 8,
-                    EGL10.EGL_DEPTH_SIZE, 16,
-                    EGL10.EGL_RENDERABLE_TYPE, eglOpenGlEs3Bit,
-                    EGL10.EGL_NONE
-                ),
-                intArrayOf(
-                    EGL10.EGL_RED_SIZE, 8,
-                    EGL10.EGL_GREEN_SIZE, 8,
-                    EGL10.EGL_BLUE_SIZE, 8,
-                    EGL10.EGL_ALPHA_SIZE, 8,
-                    EGL10.EGL_DEPTH_SIZE, 16,
-                    EGL10.EGL_RENDERABLE_TYPE, eglOpenGlEs2Bit,
-                    EGL10.EGL_NONE
-                ),
-                intArrayOf(
-                    EGL10.EGL_RED_SIZE, 8,
-                    EGL10.EGL_GREEN_SIZE, 8,
-                    EGL10.EGL_BLUE_SIZE, 8,
-                    EGL10.EGL_ALPHA_SIZE, 8,
-                    EGL10.EGL_NONE
-                ),
-                intArrayOf(EGL10.EGL_NONE)
-            )
-            val numConfig = IntArray(1)
-            for (spec in candidates) {
-                if (egl.eglChooseConfig(display, spec, null, 0, numConfig) && numConfig[0] > 0) {
-                    val configs = arrayOfNulls<EGLConfig>(numConfig[0])
-                    if (egl.eglChooseConfig(display, spec, configs, configs.size, numConfig)) {
-                        val best = configs.filterNotNull().firstOrNull()
-                        if (best != null) return best
-                    }
-                }
-            }
-            throw IllegalArgumentException("No suitable EGLConfig available")
-        }
-    }
-
     private class CosmiumRendererWrapper(
         private val view: CosmiumGLSurfaceView
     ) : Renderer {
         private var lastTimeNano = System.nanoTime()
-        var nativeHandle: Long = 0L
-            private set
+        private val nativeHandle = java.util.concurrent.atomic.AtomicLong(0L)
 
         override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
-            if (nativeHandle != 0L) {
-                CosmiumNativeBridge.nativeDestroy(nativeHandle)
-                nativeHandle = 0L
+            val prev = nativeHandle.getAndSet(0L)
+            if (prev != 0L) {
+                CosmiumNativeBridge.nativeDestroy(prev)
             }
             if (view.isReleased) return
-            nativeHandle = CosmiumNativeBridge.nativeCreate()
-            CosmiumNativeBridge.nativeInit(
-                nativeHandle,
-                view.width.coerceAtLeast(1),
-                view.height.coerceAtLeast(1)
-            )
+            val created = CosmiumNativeBridge.nativeCreate()
+            if (nativeHandle.compareAndSet(0L, created)) {
+                CosmiumNativeBridge.nativeInit(
+                    created,
+                    view.width.coerceAtLeast(1),
+                    view.height.coerceAtLeast(1)
+                )
+            } else {
+                CosmiumNativeBridge.nativeDestroy(created)
+            }
             lastTimeNano = System.nanoTime()
         }
 
         override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
-            if (nativeHandle != 0L && !view.isReleased) {
-                CosmiumNativeBridge.nativeResize(nativeHandle, width.coerceAtLeast(1), height.coerceAtLeast(1))
+            val handle = nativeHandle.get()
+            if (handle != 0L && !view.isReleased) {
+                CosmiumNativeBridge.nativeResize(handle, width.coerceAtLeast(1), height.coerceAtLeast(1))
             }
         }
 
         override fun onDrawFrame(gl: GL10?) {
-            val handle = nativeHandle
+            val handle = nativeHandle.get()
             if (handle == 0L || view.isReleased) return
 
             val now = System.nanoTime()
@@ -178,9 +186,8 @@ class CosmiumGLSurfaceView(context: Context) : GLSurfaceView(context) {
             )
         }
 
-        fun releaseOnGlThread() {
-            val handle = nativeHandle
-            nativeHandle = 0L
+        fun releaseNativeHandle() {
+            val handle = nativeHandle.getAndSet(0L)
             if (handle != 0L) {
                 CosmiumNativeBridge.nativeDestroy(handle)
             }
@@ -191,13 +198,15 @@ class CosmiumGLSurfaceView(context: Context) : GLSurfaceView(context) {
         if (isReleased) return
         isReleased = true
         queueEvent {
-            renderer.releaseOnGlThread()
+            renderer.releaseNativeHandle()
         }
     }
 
     override fun onDetachedFromWindow() {
         releaseNativeResources()
         super.onDetachedFromWindow()
+        // Reclaim any remaining C++ handle safely after GLThread has exited (C++ checks eglGetCurrentContext)
+        renderer.releaseNativeHandle()
     }
 }
 

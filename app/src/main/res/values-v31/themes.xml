@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.EduPulse" parent="android:Theme.DeviceDefault.NoActionBar">
+        <item name="android:windowBackground">@color/intro_cream_bg</item>
+        <item name="android:windowSplashScreenBackground">@color/intro_cream_bg</item>
+    </style>
+</resources>

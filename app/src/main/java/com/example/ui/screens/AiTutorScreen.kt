@@ -7,7 +7,10 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
@@ -17,6 +20,9 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -32,6 +38,7 @@ import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -73,8 +80,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -192,6 +202,10 @@ fun AiTutorScreen(
     var transientMood by remember { mutableStateOf<CosmiumMood?>(CosmiumMood.SPEAKING) }
     var tapIntensity by remember { mutableStateOf(0f) }
 
+    // Track messages that have already completed their entrance/reveal animation in this session
+    val completedAnimIds = remember(activeSessionId) { mutableStateMapOf<String, Boolean>() }
+    var sessionInteractiveStarted by remember(activeSessionId) { mutableStateOf(false) }
+
     // Initial welcome greeting speaking animation (~4.5s)
     LaunchedEffect(Unit) {
         delay(4_500L)
@@ -204,6 +218,7 @@ fun AiTutorScreen(
     LaunchedEffect(uiState, messages.lastOrNull()?.text) {
         when (uiState) {
             is AiUiState.Loading -> {
+                sessionInteractiveStarted = true
                 val lastMsg = messages.lastOrNull()
                 if (lastMsg != null && !lastMsg.isUser && lastMsg.id != "cosmos_welcome") {
                     // AI is actively streaming tokens -> speaking cadence
@@ -282,7 +297,7 @@ fun AiTutorScreen(
         }
     }
 
-    LaunchedEffect(messages.size) {
+    LaunchedEffect(messages.size, messages.lastOrNull()?.text?.length, uiState) {
         if (messages.isNotEmpty()) {
             listState.animateScrollToItem(messages.lastIndex)
         }
@@ -290,11 +305,12 @@ fun AiTutorScreen(
 
     IndoAtmosphericBackdrop(ambientGlowColor = palette.accentCyan) {
         Box(modifier = Modifier.fillMaxSize()) {
-            // Ultra-subtle 4% opacity Constellation / Mandala Star-Chart Watermark
+            // Ultra-subtle ambient twinkling Constellation / Mandala Star-Chart Watermark
             if (!palette.isEInk) {
                 CosmosConstellationWatermark(
                     goldTint = palette.accentGold,
                     cyanTint = palette.accentCyan,
+                    animateStars = isCosmosActive,
                     modifier = Modifier.fillMaxSize()
                 )
             }
@@ -362,16 +378,24 @@ fun AiTutorScreen(
                     }
 
                     items(messages, key = { it.id }) { msg ->
+                        val shouldAnimateMsg = sessionInteractiveStarted && completedAnimIds[msg.id] != true && !palette.isEInk
                         when {
                             msg.id == "cosmos_welcome" -> CosmosWelcomeSanctuaryCard(
                                 greeting = msg.text,
                                 mood = activeMood,
                                 interactionIntensity = interactionIntensity
                             )
-                            msg.isUser -> CosmosUserBubble(msg.text)
+                            msg.isUser -> CosmosUserBubble(
+                                text = msg.text,
+                                animateIn = shouldAnimateMsg,
+                                onAnimationDone = { completedAnimIds[msg.id] = true }
+                            )
                             else -> CosmosAiReplyCard(
                                 message = msg,
+                                animateIn = shouldAnimateMsg,
+                                isStreaming = (uiState is AiUiState.Loading && msg.id == messages.lastOrNull()?.id),
                                 isVoiceSpeaking = isVoiceSpeaking,
+                                onAnimationDone = { completedAnimIds[msg.id] = true },
                                 onSpeak = {
                                     if (isVoiceSpeaking) aiViewModel.stopSpeaking() else aiViewModel.speakReply(msg.text)
                                 }
@@ -379,8 +403,8 @@ fun AiTutorScreen(
                         }
                     }
 
-                    if (uiState is AiUiState.Loading) {
-                        item {
+                    if (uiState is AiUiState.Loading && messages.lastOrNull()?.isUser == true) {
+                        item(key = "cosmos_thinking_indicator") {
                             CosmosThinkingIndicator()
                         }
                     }
@@ -402,6 +426,7 @@ fun AiTutorScreen(
                                 if (built.isBlank()) {
                                     onLaunchVoiceQuiz()
                                 } else {
+                                    sessionInteractiveStarted = true
                                     aiViewModel.sendMessage(built)
                                 }
                             },
@@ -468,6 +493,7 @@ fun AiTutorScreen(
                     onSendClick = {
                         if (inputText.isNotBlank() || attachedBitmap != null) {
                             SoundHelper.playTempleChime(context)
+                            sessionInteractiveStarted = true
                             aiViewModel.sendMessage(inputText, attachedBitmap)
                             inputText = ""
                             attachedBitmap = null
@@ -510,13 +536,31 @@ fun AiTutorScreen(
 private fun CosmosConstellationWatermark(
     goldTint: Color,
     cyanTint: Color,
+    animateStars: Boolean = true,
     modifier: Modifier = Modifier
 ) {
+    val starPulse: Float
+    if (animateStars) {
+        val infiniteTransition = rememberInfiniteTransition(label = "cosmos_constellation")
+        val anim by infiniteTransition.animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 7500, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "star_twinkle"
+        )
+        starPulse = anim
+    } else {
+        starPulse = 0.5f
+    }
+
     Canvas(modifier = modifier) {
         val w = size.width
         val h = size.height
-        val starGold = goldTint.copy(alpha = 0.045f)
-        val arcCyan = cyanTint.copy(alpha = 0.04f)
+        val starGold = goldTint.copy(alpha = 0.038f + 0.028f * starPulse)
+        val arcCyan = cyanTint.copy(alpha = 0.032f + 0.025f * (1f - starPulse))
         val stroke = Stroke(width = 1.dp.toPx())
 
         // Constellation star points across canvas
@@ -535,13 +579,18 @@ private fun CosmosConstellationWatermark(
             drawLine(starGold, stars[i], stars[i + 1], strokeWidth = 0.9.dp.toPx())
         }
         stars.forEachIndexed { idx, pt ->
-            drawCircle(if (idx % 2 == 0) starGold else arcCyan, radius = 2.6.dp.toPx(), center = pt)
+            val phase = if (idx % 2 == 0) starPulse else (1f - starPulse)
+            drawCircle(
+                color = if (idx % 2 == 0) starGold else arcCyan,
+                radius = (2.2f + 1.1f * phase).dp.toPx(),
+                center = pt
+            )
         }
 
-        // Large central celestial mandala astrolabe rings (4% opacity)
+        // Large central celestial mandala astrolabe rings
         val center = Offset(w * 0.5f, h * 0.48f)
-        drawCircle(arcCyan, radius = w * 0.38f, center = center, style = stroke)
-        drawCircle(starGold, radius = w * 0.27f, center = center, style = stroke)
+        drawCircle(arcCyan, radius = w * (0.375f + 0.01f * starPulse), center = center, style = stroke)
+        drawCircle(starGold, radius = w * (0.265f + 0.01f * (1f - starPulse)), center = center, style = stroke)
     }
 }
 
@@ -851,10 +900,38 @@ private fun CosmosWelcomeSanctuaryCard(
 }
 
 @Composable
-private fun CosmosUserBubble(text: String) {
+private fun CosmosUserBubble(
+    text: String,
+    animateIn: Boolean = false,
+    onAnimationDone: () -> Unit = {}
+) {
     val palette = LocalIndoPalette.current
+    val appearProgress = remember { Animatable(if (animateIn) 0f else 1f) }
+
+    LaunchedEffect(animateIn) {
+        if (animateIn && appearProgress.value < 1f) {
+            appearProgress.animateTo(
+                targetValue = 1f,
+                animationSpec = tween(
+                    durationMillis = 560,
+                    easing = CubicBezierEasing(0.16f, 1f, 0.3f, 1f)
+                )
+            )
+            onAnimationDone()
+        }
+    }
+
+    val progress = appearProgress.value
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .graphicsLayer {
+                alpha = progress
+                val s = 0.92f + 0.08f * progress
+                scaleX = s
+                scaleY = s
+                translationY = (1f - progress) * 20.dp.toPx()
+            },
         horizontalArrangement = Arrangement.End
     ) {
         IndoToneSurface(
@@ -876,15 +953,83 @@ private fun CosmosUserBubble(text: String) {
 @Composable
 private fun CosmosAiReplyCard(
     message: ChatMessage,
+    animateIn: Boolean = false,
+    isStreaming: Boolean = false,
     isVoiceSpeaking: Boolean = false,
+    onAnimationDone: () -> Unit = {},
     onSpeak: (() -> Unit)? = null
 ) {
     val palette = LocalIndoPalette.current
     val context = LocalContext.current
-    val segments = remember(message.text) { parseCosmosSegments(message.text) }
+    val fullText = message.text
+
+    // 1. Gentle standard-sized bubble entrance animation
+    val cardEnter = remember(message.id) { Animatable(if (animateIn) 0f else 1f) }
+    LaunchedEffect(message.id, animateIn) {
+        if (animateIn && cardEnter.value < 1f) {
+            cardEnter.animateTo(
+                targetValue = 1f,
+                animationSpec = tween(
+                    durationMillis = 480,
+                    easing = CubicBezierEasing(0.16f, 1f, 0.3f, 1f)
+                )
+            )
+        }
+    }
+
+    // 2. Gradual text reveal so the standard-sized bubble slowly expands as text appears
+    var revealedChars by remember(message.id) {
+        mutableIntStateOf(if (animateIn && !palette.isEInk) 0 else fullText.length)
+    }
+    val latestFullText by rememberUpdatedState(fullText)
+    val latestIsStreaming by rememberUpdatedState(isStreaming)
+    LaunchedEffect(message.id, animateIn) {
+        if (!animateIn || palette.isEInk) {
+            revealedChars = latestFullText.length
+            onAnimationDone()
+            return@LaunchedEffect
+        }
+        // Small calm pause on initial standard-sized card before text begins flowing in
+        if (revealedChars == 0) {
+            delay(180L)
+        }
+        while (latestIsStreaming || revealedChars < latestFullText.length) {
+            val targetLen = latestFullText.length
+            if (revealedChars < targetLen) {
+                val remaining = targetLen - revealedChars
+                val step = when {
+                    revealedChars < 120 -> 2
+                    remaining > 450 -> 5
+                    else -> 3
+                }
+                revealedChars = (revealedChars + step).coerceAtMost(targetLen)
+            }
+            delay(20L)
+        }
+        onAnimationDone()
+    }
+
+    val isStillRevealing = revealedChars < fullText.length
+    val displayedText = if (isStillRevealing || isStreaming) fullText.take(revealedChars) else fullText
+    val segments = remember(displayedText) { parseCosmosSegments(displayedText) }
+    val enterVal = cardEnter.value
 
     IndoToneSurface(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .graphicsLayer {
+                alpha = enterVal
+                val s = 0.95f + 0.05f * enterVal
+                scaleX = s
+                scaleY = s
+                translationY = (1f - enterVal) * 16.dp.toPx()
+            }
+            .animateContentSize(
+                animationSpec = tween(
+                    durationMillis = 360,
+                    easing = CubicBezierEasing(0.22f, 1f, 0.36f, 1f)
+                )
+            ),
         shape = RoundedCornerShape(topStart = 6.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 18.dp),
         containerColor = palette.cardSurface,
         hairlineColor = palette.goldHairline
@@ -892,6 +1037,13 @@ private fun CosmosAiReplyCard(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .then(
+                    if (isStillRevealing || isStreaming) {
+                        Modifier.defaultMinSize(minHeight = 92.dp)
+                    } else {
+                        Modifier
+                    }
+                )
                 .height(IntrinsicSize.Min)
         ) {
             // Vibrant Saffron Amber (#E88D14) Left Accent Bar
@@ -908,41 +1060,54 @@ private fun CosmosAiReplyCard(
                     .padding(horizontal = 14.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                segments.forEach { seg ->
-                    when (seg) {
-                        is CosmosSegment.CodeOrFormula -> {
-                            IndoToneSurface(
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(12.dp),
-                                containerColor = if (palette.isEInk) palette.elevatedSurface else palette.highlightSurface,
-                                hairlineColor = palette.goldHairline
-                            ) {
-                                Text(
+                if (isStillRevealing || isStreaming) {
+                    // Render smooth 60fps text during reveal/streaming to expand card cleanly without WebView flicker
+                    Text(
+                        text = if (displayedText.isEmpty()) "…" else displayedText,
+                        style = MaterialTheme.typography.bodyMedium,
+                        lineHeight = 22.sp,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                } else {
+                    segments.forEach { seg ->
+                        when (seg) {
+                            is CosmosSegment.CodeOrFormula -> {
+                                IndoToneSurface(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(12.dp),
+                                    containerColor = if (palette.isEInk) palette.elevatedSurface else palette.highlightSurface,
+                                    hairlineColor = palette.goldHairline
+                                ) {
+                                    Text(
+                                        text = seg.content,
+                                        modifier = Modifier
+                                            .horizontalScroll(rememberScrollState())
+                                            .padding(12.dp),
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = 12.sp,
+                                        lineHeight = 18.sp,
+                                        color = when {
+                                            palette.isEInk -> MaterialTheme.colorScheme.onSurface
+                                            palette.isDark -> Color(0xFF7CE8FF)
+                                            else -> palette.accentCyan
+                                        }
+                                    )
+                                }
+                            }
+                            is CosmosSegment.Prose -> {
+                                com.example.ui.components.CosmosMathProseView(
                                     text = seg.content,
-                                    modifier = Modifier
-                                        .horizontalScroll(rememberScrollState())
-                                        .padding(12.dp),
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = 12.sp,
-                                    lineHeight = 18.sp,
-                                    color = when {
-                                        palette.isEInk -> MaterialTheme.colorScheme.onSurface
-                                        palette.isDark -> Color(0xFF7CE8FF)
-                                        else -> palette.accentCyan
-                                    }
+                                    textColor = MaterialTheme.colorScheme.onSurface
                                 )
                             }
-                        }
-                        is CosmosSegment.Prose -> {
-                            com.example.ui.components.CosmosMathProseView(
-                                text = seg.content,
-                                textColor = MaterialTheme.colorScheme.onSurface
-                            )
                         }
                     }
                 }
 
-                if (message.ragSources.isNotEmpty()) {
+                AnimatedVisibility(
+                    visible = !isStillRevealing && !isStreaming && message.ragSources.isNotEmpty(),
+                    enter = fadeIn(tween(320)) + expandVertically(tween(320))
+                ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -967,7 +1132,7 @@ private fun CosmosAiReplyCard(
                     }
                 }
 
-                if (onSpeak != null) {
+                if (onSpeak != null && !isStillRevealing && !isStreaming) {
                     Spacer(modifier = Modifier.height(4.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -1041,25 +1206,57 @@ private fun parseCosmosSegments(raw: String): List<CosmosSegment> {
 @Composable
 private fun CosmosThinkingIndicator() {
     val palette = LocalIndoPalette.current
-    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
+    val enterAlpha = remember { Animatable(0f) }
+    LaunchedEffect(Unit) {
+        enterAlpha.animateTo(1f, tween(380, easing = FastOutSlowInEasing))
+    }
+    val breathAlpha: Float
+    if (!palette.isEInk) {
+        val infiniteTransition = rememberInfiniteTransition(label = "cosmos_thinking_breath")
+        val anim by infiniteTransition.animateFloat(
+            initialValue = 0.62f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 1200, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "thinking_text_pulse"
+        )
+        breathAlpha = anim
+    } else {
+        breathAlpha = 1f
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .graphicsLayer {
+                alpha = enterAlpha.value
+                translationY = (1f - enterAlpha.value) * 10.dp.toPx()
+            },
+        horizontalArrangement = Arrangement.Start
+    ) {
         IndoToneSurface(
-            shape = RoundedCornerShape(16.dp),
+            modifier = Modifier
+                .fillMaxWidth(0.86f)
+                .defaultMinSize(minHeight = 68.dp),
+            shape = RoundedCornerShape(topStart = 6.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 18.dp),
             containerColor = palette.cardSurface,
             hairlineColor = palette.goldHairline
         ) {
             Row(
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 CosmiumOrb(
-                    size = 24.dp,
+                    size = 28.dp,
                     mood = CosmiumMood.THINKING
                 )
                 Text(
                     text = "Cosmium is weaving an explanation...",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = breathAlpha)
                 )
             }
         }

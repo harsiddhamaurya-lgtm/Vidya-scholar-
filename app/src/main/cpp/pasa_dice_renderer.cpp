@@ -1,10 +1,20 @@
 #include "pasa_dice_renderer.h"
+#include <EGL/egl.h>
 #include <GLES3/gl3.h>
 #include <android/log.h>
 #include <cmath>
 #include <vector>
 #include <string>
 #include <algorithm>
+
+static inline bool hasDiceEglContext() {
+    return eglGetCurrentContext() != EGL_NO_CONTEXT;
+}
+
+static inline bool hasDiceDrawableContext() {
+    return eglGetCurrentContext() != EGL_NO_CONTEXT &&
+           eglGetCurrentSurface(EGL_DRAW) != EGL_NO_SURFACE;
+}
 
 #define LOG_TAG "PasaDiceNative"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -229,11 +239,19 @@ static void cacheDiceUniforms(DiceProgramUniforms& target) {
 }
 
 void PasaDiceRenderer::cleanupShaders() {
-    if (highLodProgram_.program) { glDeleteProgram(highLodProgram_.program); highLodProgram_.program = 0; }
-    if (lowLodProgram_.program) { glDeleteProgram(lowLodProgram_.program); lowLodProgram_.program = 0; }
+    const bool hasCtx = hasDiceEglContext();
+    if (highLodProgram_.program) {
+        if (hasCtx) glDeleteProgram(highLodProgram_.program);
+        highLodProgram_.program = 0;
+    }
+    if (lowLodProgram_.program) {
+        if (hasCtx) glDeleteProgram(lowLodProgram_.program);
+        lowLodProgram_.program = 0;
+    }
 }
 
 void PasaDiceRenderer::setupShaders() {
+    if (!hasDiceEglContext()) return;
     cleanupShaders();
     highLodProgram_.program = linkDiceProgram(kDiceHighVertexShaderSrc, kDiceHighFragmentShaderSrc);
     cacheDiceUniforms(highLodProgram_);
@@ -242,9 +260,19 @@ void PasaDiceRenderer::setupShaders() {
 }
 
 void PasaDiceRenderer::cleanupMesh() {
-    if (cubeVao_) { glDeleteVertexArrays(1, &cubeVao_); cubeVao_ = 0; }
-    if (cubeVbo_) { glDeleteBuffers(1, &cubeVbo_); cubeVbo_ = 0; }
-    if (cubeEbo_) { glDeleteBuffers(1, &cubeEbo_); cubeEbo_ = 0; }
+    const bool hasCtx = hasDiceEglContext();
+    if (cubeVao_) {
+        if (hasCtx) glDeleteVertexArrays(1, &cubeVao_);
+        cubeVao_ = 0;
+    }
+    if (cubeVbo_) {
+        if (hasCtx) glDeleteBuffers(1, &cubeVbo_);
+        cubeVbo_ = 0;
+    }
+    if (cubeEbo_) {
+        if (hasCtx) glDeleteBuffers(1, &cubeEbo_);
+        cubeEbo_ = 0;
+    }
 }
 
 // Smoothly rounded bevelled cube via squircle / superellipsoid corner rounding
@@ -365,6 +393,7 @@ static void generateRoundedDiceMesh(
 }
 
 void PasaDiceRenderer::setupMesh(bool lowLod) {
+    if (!hasDiceEglContext()) return;
     cleanupMesh();
 
     int subdiv = lowLod ? 6 : 14;
@@ -397,6 +426,10 @@ void PasaDiceRenderer::setupMesh(bool lowLod) {
 }
 
 void PasaDiceRenderer::init(int width, int height) {
+    if (!hasDiceDrawableContext()) {
+        initialized_ = false;
+        return;
+    }
     setupShaders();
 
     const char* rendererStr = reinterpret_cast<const char*>(glGetString(GL_RENDERER));
@@ -419,9 +452,10 @@ void PasaDiceRenderer::init(int width, int height) {
 }
 
 void PasaDiceRenderer::resize(int width, int height) {
+    if (!initialized_ || !hasDiceDrawableContext()) return;
     if (width > 0 && height > 0) {
         glViewport(0, 0, width, height);
-        aspect_ = static_cast<float>(width) / static_cast<float>(height);
+        aspect_ = std::max(0.01f, static_cast<float>(width) / static_cast<float>(height));
     }
 }
 
@@ -500,7 +534,7 @@ static float wrapNearestTarget(float current, float target) {
 }
 
 void PasaDiceRenderer::render(float dt, int diceValue, bool isRolling, int accentColorHex, bool enabled) {
-    if (!initialized_) return;
+    if (!initialized_ || !hasDiceDrawableContext()) return;
 
     totalTime_ += dt;
 
