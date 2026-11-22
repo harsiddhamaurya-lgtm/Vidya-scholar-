@@ -12,7 +12,12 @@ object OfflineLaTeXAssetInstaller {
     fun ensureKaTeXAssetsInstalled(context: Context): File {
         val latexDir = File(context.filesDir, "cosmium_latex")
         val marker = File(latexDir, ".installed_ok")
-        if (marker.exists() && File(latexDir, "katex.min.js").exists()) {
+        val hasCoreAssets = marker.exists() &&
+            File(latexDir, "katex.min.js").exists() &&
+            File(latexDir, "katex.min.css").exists() &&
+            File(latexDir, "contrib/auto-render.min.js").exists() &&
+            File(latexDir, "fonts/KaTeX_Main-Regular.woff2").exists()
+        if (hasCoreAssets) {
             return latexDir
         }
         latexDir.mkdirs()

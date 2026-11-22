@@ -19,8 +19,9 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
 /**
- * On-demand downloader for pre-trained ONNX models into app-internal `filesDir/cosmium_models`.
- * Complies with Google Play storage policy (zero broad storage permissions required).
+ * On-demand downloader for genuine pre-trained models into app-internal storage.
+ * Complies strictly with Google Play storage policy (zero broad storage permissions)
+ * and never writes corrupt/dummy stub payloads that could misalign vector spaces.
  */
 class OfflineModelVaultDownloader(
     private val context: Context,
@@ -98,8 +99,8 @@ class OfflineModelVaultDownloader(
                 ModelDownloadStatus(spec = spec, state = DownloadTaskState.DOWNLOADING, progress = 0.02f)
             )
 
-            // 1. Download tokenizer.json first (tiny metadata file)
-            if (!tokenizerTarget.exists() || tokenizerTarget.length() < 128L) {
+            // 1. Download tokenizer vocabulary JSON first
+            if (!modelManager.isTokenizerValid(tokenizerTarget)) {
                 downloadSingleFile(
                     url = spec.tokenizerDownloadUrl,
                     dest = tokenizerTarget,
@@ -107,7 +108,11 @@ class OfflineModelVaultDownloader(
                 ) { _, _ -> }
             }
 
-            // 2. Stream primary ONNX weights with resume support
+            if (!modelManager.isTokenizerValid(tokenizerTarget)) {
+                throw IllegalStateException("Tokenizer metadata verification failed.")
+            }
+
+            // 2. Stream genuine model weights with resume support
             downloadSingleFile(
                 url = spec.primaryDownloadUrl,
                 dest = modelTmp,
@@ -138,8 +143,9 @@ class OfflineModelVaultDownloader(
                 )
             )
 
-            if (!modelTmp.exists() || modelTmp.length() < 1024L) {
-                throw IllegalStateException("Downloaded ONNX artifact failed integrity size check.")
+            val minSize = modelManager.minValidModelBytes(spec)
+            if (!modelTmp.exists() || modelTmp.length() < minSize || modelManager.isCorruptStub(modelTmp)) {
+                throw IllegalStateException("Downloaded study engine package failed integrity check.")
             }
 
             if (modelTarget.exists()) modelTarget.delete()
@@ -166,31 +172,27 @@ class OfflineModelVaultDownloader(
                     spec = spec,
                     state = DownloadTaskState.NOT_DOWNLOADED,
                     progress = 0f,
-                    errorMessage = "Download paused/cancelled"
+                    errorMessage = "Download paused"
                 )
             )
             throw ce
         } catch (e: Exception) {
-            Log.w(TAG, "Network restriction or HTTP error (${e.message}) for ${spec.displayName}. Activating offline hybrid engine stub...", e)
+            // Never write dummy placeholder bytes when offline/unreachable; keep built-in C++ semantic engine active cleanly.
+            Log.w(TAG, "Study pack remote fetch unavailable (${e.message}); retaining verified local engine.", e)
             runCatching {
-                if (!tokenizerTarget.exists() || tokenizerTarget.length() < 128L) {
-                    tokenizerTarget.writeText("{\"vocab\": {\"[PAD]\": 0, \"[UNK]\": 1, \"[CLS]\": 2, \"[SEP]\": 3}, \"model\": \"cosmium_offline_fallback_tokenizer_v1\"}")
-                }
-                if (!modelTarget.exists() || modelTarget.length() < 1024L) {
-                    modelTarget.writeBytes(ByteArray(4096) { 0x58 })
-                }
+                if (modelTmp.exists()) modelTmp.delete()
+                if (modelTarget.exists() && modelManager.isCorruptStub(modelTarget)) modelTarget.delete()
             }
             updateFlow(
                 spec,
                 ModelDownloadStatus(
                     spec = spec,
-                    state = DownloadTaskState.READY,
-                    progress = 1f,
-                    downloadedBytes = modelTarget.length(),
-                    totalBytes = modelTarget.length()
+                    state = DownloadTaskState.FAILED,
+                    progress = 0f,
+                    errorMessage = "Offline mode active using built-in curriculum engine"
                 )
             )
-            true
+            false
         } finally {
             activeJobs.remove(spec)
         }
@@ -222,10 +224,10 @@ class OfflineModelVaultDownloader(
 
         client.newCall(reqBuilder.build()).execute().use { response ->
             if (!response.isSuccessful && response.code != 206) {
-                throw IllegalStateException("HTTP ${response.code} while downloading model artifact")
+                throw IllegalStateException("HTTP ${response.code} while downloading package")
             }
             val appendMode = response.code == 206 && existingBytes > 0L
-            val body = response.body ?: throw IllegalStateException("Empty HTTP response body")
+            val body = response.body ?: throw IllegalStateException("Empty download response")
             val contentLen = body.contentLength()
             val totalExpected = if (appendMode && contentLen > 0L) existingBytes + contentLen else contentLen
 

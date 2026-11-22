@@ -88,26 +88,12 @@ object LudoEngine {
      * Computes exact destination board position (-1, 0..51 track, 52..56 home column, 57 Home)
      * using relative distance around each color's 56-step complete Pachisi circuit.
      */
-    fun getDestinationPosition(token: LudoToken, dice: Int): Int? {
-        if (token.isHome) return null
-        if (token.isInYard) {
-            return if (dice == 6) token.color.startTrackIndex else null
-        }
-
-        val currentRelStep = if (token.position in 52..56) {
-            token.position - 1 // 51..55
-        } else {
-            (token.position - token.color.startTrackIndex + 52) % 52 // 0..50
-        }
-
-        val nextRelStep = currentRelStep + dice
-        return when {
-            nextRelStep > 56 -> null // Must roll exact number to enter center Home
-            nextRelStep == 56 -> 57  // Center Home Sanctuary!
-            nextRelStep in 51..55 -> nextRelStep + 1 // 52..56 Home Column
-            else -> (token.color.startTrackIndex + nextRelStep) % 52
-        }
-    }
+    fun getDestinationPosition(token: LudoToken, dice: Int): Int? =
+        com.example.utils.NativeCoreBridge.getLudoDestinationPosition(
+            position = token.position,
+            startTrackIndex = token.color.startTrackIndex,
+            dice = dice
+        )
 
     fun canMoveToken(token: LudoToken, dice: Int): Boolean {
         return getDestinationPosition(token, dice) != null

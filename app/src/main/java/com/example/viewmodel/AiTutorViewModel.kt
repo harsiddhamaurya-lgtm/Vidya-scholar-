@@ -23,6 +23,7 @@ import com.example.rag.SyllabusPackCatalog
 import com.example.rag.VoiceQuizUiState
 import com.example.security.SecurePrefsFactory
 import com.example.utils.CosmiumVoiceManager
+import com.example.utils.NativeCoreBridge
 import com.example.utils.OfflineCosmiumKnowledgeEngine
 import com.google.firebase.Firebase
 import com.google.firebase.ai.ai
@@ -51,13 +52,16 @@ data class OnboardingProvisioningState(
 )
 
 class AiTutorViewModel(application: Application) : AndroidViewModel(application) {
-    private val TAG = "AiTutorViewModel"
+    private companion object {
+        const val TAG = "AiTutorViewModel"
+        const val MESSAGE_PAGE_SIZE = 20
+    }
+
     private val appContext = application.applicationContext
     private val prefs = SecurePrefsFactory.getEncryptedPrefs(appContext, "cosmium_vault_prefs_v1")
 
     val voiceManager = CosmiumVoiceManager(appContext)
     val ragManager = OfflineRAGManager(appContext)
-    val ragEngine: OfflineRAGManager get() = ragManager
 
     val chatRepo = CosmosChatRepository(appContext)
     val voiceQuizManager = CosmosVoiceQuizManager(appContext, voiceManager, viewModelScope)
@@ -75,7 +79,12 @@ class AiTutorViewModel(application: Application) : AndroidViewModel(application)
         )
 
     private val model by lazy {
-        Firebase.ai.generativeModel("gemini-3.8-flash")
+        Firebase.ai.generativeModel(
+            modelName = "gemini-3.8-flash",
+            systemInstruction = content {
+                text(NativeCoreBridge.cosmosSystemInstruction())
+            }
+        )
     }
 
     private val _messages = MutableStateFlow<List<ChatMessage>>(
@@ -96,7 +105,6 @@ class AiTutorViewModel(application: Application) : AndroidViewModel(application)
     val isLoadingOlder: StateFlow<Boolean> = _isLoadingOlder.asStateFlow()
 
     private var loadedMessageOffset = 0
-    private val MESSAGE_PAGE_SIZE = 20
 
     private val _uiState = MutableStateFlow<AiUiState>(AiUiState.Idle)
     val uiState: StateFlow<AiUiState> = _uiState.asStateFlow()
@@ -117,10 +125,10 @@ class AiTutorViewModel(application: Application) : AndroidViewModel(application)
     val vaultUiState: StateFlow<OfflineVaultUiState> = combine(
         _studentScope,
         _isOnline,
-        ragEngine.packStatus,
-        ragEngine.downloader.miniLmStatus,
-        ragEngine.downloader.qwenStatus,
-        ragEngine.modelManager.lifecycleState,
+        ragManager.packStatus,
+        ragManager.downloader.miniLmStatus,
+        ragManager.downloader.qwenStatus,
+        ragManager.modelManager.lifecycleState,
         _bannerVisible,
         _voiceLangCode
     ) { values ->
@@ -134,12 +142,12 @@ class AiTutorViewModel(application: Application) : AndroidViewModel(application)
         val showBanner = values[6] as Boolean
         val voiceLang = values[7] as String
 
-        val (freeRamMb, totalRamMb) = ragEngine.modelManager.getMemoryStatsMb()
-        val availStorageMb = ragEngine.downloader.getAvailableStorageMb()
+        val (freeRamMb, totalRamMb) = ragManager.modelManager.getMemoryStatsMb()
+        val availStorageMb = ragManager.downloader.getAvailableStorageMb()
 
         val activeMode = when {
             online -> BrainMode.ONLINE_GEMINI
-            qwen.state == DownloadTaskState.READY && ragEngine.modelManager.canSafelyLoadQwen4Bit() ->
+            qwen.state == DownloadTaskState.READY && ragManager.modelManager.canSafelyLoadQwen4Bit() ->
                 BrainMode.OFFLINE_QWEN_4BIT_RAG
             else -> BrainMode.OFFLINE_HYBRID_RAG
         }
@@ -327,60 +335,65 @@ class AiTutorViewModel(application: Application) : AndroidViewModel(application)
     fun syncStudentScope(standardId: String, streamId: String) {
         val effectiveStream = SyllabusPackCatalog.normalizeStreamForStandard(standardId, streamId)
         val newScope = standardId to effectiveStream
-        if (_studentScope.value != newScope) {
+        val changed = _studentScope.value != newScope
+        if (changed) {
             _studentScope.value = newScope
         }
         viewModelScope.launch {
-            ragEngine.refreshPackStatus(standardId, effectiveStream)
+            if (changed) {
+                ragManager.switchActiveScope(standardId, effectiveStream)
+            } else {
+                ragManager.refreshPackStatus(standardId, effectiveStream)
+            }
         }
     }
 
     fun refreshVaultStatus() {
         val (std, stream) = _studentScope.value
-        ragEngine.downloader.refreshStatuses()
+        ragManager.downloader.refreshStatuses()
         viewModelScope.launch {
-            ragEngine.refreshPackStatus(std, stream)
+            ragManager.refreshPackStatus(std, stream)
         }
     }
 
     fun installStandardPack() {
         val (std, stream) = _studentScope.value
         viewModelScope.launch {
-            ragEngine.installOrReindexPack(std, stream)
+            ragManager.installOrReindexPack(std, stream)
         }
     }
 
     fun clearStandardPack() {
         val (std, stream) = _studentScope.value
         viewModelScope.launch {
-            ragEngine.clearPackForScope(std, stream)
+            ragManager.clearPackForScope(std, stream)
         }
     }
 
     fun downloadModel(spec: OfflineModelSpec) {
         viewModelScope.launch {
-            val ok = ragEngine.downloader.downloadModel(spec)
+            val ok = ragManager.downloader.downloadModel(spec)
             if (ok && spec == OfflineModelSpec.MINILM_ENCODER && vaultUiState.value.packStatus.isInstalled) {
                 // Re-index cached textbook vectors with freshly downloaded MiniLM encoder
                 val (std, stream) = _studentScope.value
-                ragEngine.installOrReindexPack(std, stream)
+                ragManager.installOrReindexPack(std, stream)
             }
         }
     }
 
     fun cancelModelDownload(spec: OfflineModelSpec) {
-        ragEngine.downloader.cancelDownload(spec)
+        ragManager.downloader.cancelDownload(spec)
     }
 
     fun deleteModel(spec: OfflineModelSpec) {
         viewModelScope.launch {
-            ragEngine.downloader.deleteModel(spec)
+            ragManager.downloader.deleteModel(spec)
         }
     }
 
     fun unloadModelsFromRam() {
         viewModelScope.launch {
-            ragEngine.unloadModelsFromRam()
+            ragManager.unloadModelsFromRam()
         }
     }
 
@@ -433,36 +446,13 @@ class AiTutorViewModel(application: Application) : AndroidViewModel(application)
                 isComplete = false
             )
 
-            // 3. Install & index matching Standard + Stream syllabus guide
-            val packMonitorJob = launch {
-                ragEngine.packStatus.collect { pack ->
-                    if (pack.isInstalling) {
-                        val mapped = (0.15f + pack.installProgress * 0.25f).coerceIn(0.15f, 0.40f)
-                        if (mapped > _onboardingProvisioning.value.progress) {
-                            _onboardingProvisioning.value = OnboardingProvisioningState(
-                                isRunning = true,
-                                progress = mapped,
-                                isComplete = false
-                            )
-                        }
-                    }
-                }
-            }
-            runCatching { ragEngine.installOrReindexPack(standardId, effectiveStream) }
-            packMonitorJob.cancel()
-
-            _onboardingProvisioning.value = OnboardingProvisioningState(
-                isRunning = true,
-                progress = 0.42f,
-                isComplete = false
-            )
-
-            // 3. Download core offline AI weights if connected and not already present
-            if (fetchRemoteWeights && checkCurrentConnectivity()) {
+            // 3. Download semantic embedding model FIRST when online so chapter vectors share one unified space
+            var miniOk = ragManager.modelManager.isModelDownloaded(OfflineModelSpec.MINILM_ENCODER)
+            if (fetchRemoteWeights && checkCurrentConnectivity() && !miniOk) {
                 val miniMonitor = launch {
-                    ragEngine.downloader.miniLmStatus.collect { st ->
+                    ragManager.downloader.miniLmStatus.collect { st ->
                         if (st.state == DownloadTaskState.DOWNLOADING || st.state == DownloadTaskState.VERIFYING) {
-                            val mapped = (0.42f + st.progress * 0.16f).coerceIn(0.42f, 0.58f)
+                            val mapped = (0.15f + st.progress * 0.20f).coerceIn(0.15f, 0.35f)
                             if (mapped > _onboardingProvisioning.value.progress) {
                                 _onboardingProvisioning.value = OnboardingProvisioningState(
                                     isRunning = true,
@@ -473,43 +463,66 @@ class AiTutorViewModel(application: Application) : AndroidViewModel(application)
                         }
                     }
                 }
-                val miniOk = if (!ragEngine.modelManager.isModelDownloaded(OfflineModelSpec.MINILM_ENCODER)) {
-                    runCatching { ragEngine.downloader.downloadModel(OfflineModelSpec.MINILM_ENCODER) }.getOrDefault(false)
-                } else {
-                    true
-                }
+                miniOk = runCatching {
+                    ragManager.downloader.downloadModel(OfflineModelSpec.MINILM_ENCODER)
+                }.getOrDefault(false)
                 miniMonitor.cancel()
+            }
 
-                if (miniOk) {
-                    _onboardingProvisioning.value = OnboardingProvisioningState(
-                        isRunning = true,
-                        progress = 0.60f,
-                        isComplete = false
-                    )
+            _onboardingProvisioning.value = OnboardingProvisioningState(
+                isRunning = true,
+                progress = 0.36f,
+                isComplete = false
+            )
 
-                    val coreMonitor = launch {
-                        ragEngine.downloader.qwenStatus.collect { st ->
-                            if (st.state == DownloadTaskState.DOWNLOADING || st.state == DownloadTaskState.VERIFYING) {
-                                val mapped = (0.60f + st.progress * 0.34f).coerceIn(0.60f, 0.94f)
-                                if (mapped > _onboardingProvisioning.value.progress) {
-                                    _onboardingProvisioning.value = OnboardingProvisioningState(
-                                        isRunning = true,
-                                        progress = mapped,
-                                        isComplete = false
-                                    )
-                                }
+            // 4. Lazily install ONLY the chosen Standard + Stream syllabus pack and evict all others
+            val packMonitorJob = launch {
+                ragManager.packStatus.collect { pack ->
+                    if (pack.isInstalling) {
+                        val mapped = (0.37f + pack.installProgress * 0.23f).coerceIn(0.37f, 0.60f)
+                        if (mapped > _onboardingProvisioning.value.progress) {
+                            _onboardingProvisioning.value = OnboardingProvisioningState(
+                                isRunning = true,
+                                progress = mapped,
+                                isComplete = false
+                            )
+                        }
+                    }
+                }
+            }
+            runCatching { ragManager.installOrReindexPack(standardId, effectiveStream) }
+            packMonitorJob.cancel()
+
+            _onboardingProvisioning.value = OnboardingProvisioningState(
+                isRunning = true,
+                progress = 0.62f,
+                isComplete = false
+            )
+
+            // 5. Download full offline reasoning model if connected and MiniLM verified
+            if (fetchRemoteWeights && checkCurrentConnectivity() && miniOk) {
+                val coreMonitor = launch {
+                    ragManager.downloader.qwenStatus.collect { st ->
+                        if (st.state == DownloadTaskState.DOWNLOADING || st.state == DownloadTaskState.VERIFYING) {
+                            val mapped = (0.62f + st.progress * 0.32f).coerceIn(0.62f, 0.94f)
+                            if (mapped > _onboardingProvisioning.value.progress) {
+                                _onboardingProvisioning.value = OnboardingProvisioningState(
+                                    isRunning = true,
+                                    progress = mapped,
+                                    isComplete = false
+                                )
                             }
                         }
                     }
-                    if (!ragEngine.modelManager.isModelDownloaded(OfflineModelSpec.QWEN_2_5_3B_INT4)) {
-                        runCatching { ragEngine.downloader.downloadModel(OfflineModelSpec.QWEN_2_5_3B_INT4) }
-                    }
-                    coreMonitor.cancel()
                 }
+                if (!ragManager.modelManager.isModelDownloaded(OfflineModelSpec.QWEN_2_5_3B_INT4)) {
+                    runCatching { ragManager.downloader.downloadModel(OfflineModelSpec.QWEN_2_5_3B_INT4) }
+                }
+                coreMonitor.cancel()
             }
 
-            // 4. Silently finalize initialization of syllabus guide, offline engine, and TTS
-            val currentProg = _onboardingProvisioning.value.progress.coerceAtLeast(0.65f)
+            // 6. Silently finalize initialization of syllabus guide, offline engine, and TTS
+            val currentProg = _onboardingProvisioning.value.progress.coerceAtLeast(0.66f)
             val steps = listOf(
                 maxOf(currentProg, 0.78f),
                 0.90f,
@@ -524,7 +537,7 @@ class AiTutorViewModel(application: Application) : AndroidViewModel(application)
                 kotlinx.coroutines.delay(140L)
             }
 
-            runCatching { ragEngine.refreshPackStatus(standardId, effectiveStream) }
+            runCatching { ragManager.refreshPackStatus(standardId, effectiveStream) }
             runCatching { voiceManager.prepareLanguageForOffline(preferredLanguage) }
 
             _onboardingProvisioning.value = OnboardingProvisioningState(
@@ -541,8 +554,8 @@ class AiTutorViewModel(application: Application) : AndroidViewModel(application)
 
     fun resetOnboardingProvisioning() {
         provisioningJob?.cancel()
-        ragEngine.downloader.cancelDownload(OfflineModelSpec.MINILM_ENCODER)
-        ragEngine.downloader.cancelDownload(OfflineModelSpec.QWEN_2_5_3B_INT4)
+        ragManager.downloader.cancelDownload(OfflineModelSpec.MINILM_ENCODER)
+        ragManager.downloader.cancelDownload(OfflineModelSpec.QWEN_2_5_3B_INT4)
         _onboardingProvisioning.value = OnboardingProvisioningState()
     }
 
@@ -585,7 +598,7 @@ class AiTutorViewModel(application: Application) : AndroidViewModel(application)
                     query = cleanPrompt.ifBlank { scopeTitle },
                     standardId = stdId,
                     streamId = streamId,
-                    topK = 2
+                    topK = 1
                 )
             }.getOrDefault(emptyList())
 
@@ -610,10 +623,12 @@ class AiTutorViewModel(application: Application) : AndroidViewModel(application)
 
             try {
                 val ragContextBlock = if (localHits.isNotEmpty()) {
-                    "\n\nGrounded Syllabus References ($scopeTitle):\n" +
-                        localHits.joinToString("\n") { hit ->
-                            "- [${hit.chunk.subjectName} Ch.${hit.chunk.chapterNumber}: ${hit.chunk.topicTitle}] ${hit.chunk.contentText} (Formulas: ${hit.chunk.formulaTags})"
-                        }
+                    val primary = localHits.first()
+                    val excerpt = SyllabusPackCatalog.getStructuredLesson(primary.chunk.chunkId)
+                        ?.take(900)
+                        ?: "${primary.chunk.contentText} (Formulas: ${primary.chunk.formulaTags})"
+                    "\n\nMatched Syllabus Reference ($scopeTitle — use ONLY if directly relevant to the student's question):\n" +
+                        "- [${primary.chunk.subjectName} Ch.${primary.chunk.chapterNumber}: ${primary.chunk.topicTitle}]\n$excerpt"
                 } else ""
 
                 val gradeNum = when {
@@ -622,7 +637,7 @@ class AiTutorViewModel(application: Application) : AndroidViewModel(application)
                     stdId.contains("12") -> 12
                     else -> 11
                 }
-                val baseDirective = com.example.utils.NativeCoreBridge.calibrateCosmosPrompt(
+                val baseDirective = NativeCoreBridge.calibrateCosmosPrompt(
                     userQuery = cleanPrompt,
                     standardGrade = gradeNum,
                     streamId = streamId,
@@ -645,7 +660,7 @@ class AiTutorViewModel(application: Application) : AndroidViewModel(application)
                         if (!part.isNullOrEmpty()) {
                             builder.append(part)
                             val currentRaw = builder.toString()
-                            val updatedText = com.example.utils.NativeCoreBridge.sanitizeAndFormatMath(
+                            val updatedText = NativeCoreBridge.sanitizeAndFormatMath(
                                 rawText = currentRaw,
                                 standardGrade = gradeNum,
                                 streamId = streamId
@@ -671,7 +686,7 @@ class AiTutorViewModel(application: Application) : AndroidViewModel(application)
                 val rawFinal = builder.toString().ifBlank {
                     "I couldn't generate an answer right now. Try rephrasing your challenge!"
                 }
-                val finalText = com.example.utils.NativeCoreBridge.sanitizeAndFormatMath(
+                val finalText = NativeCoreBridge.sanitizeAndFormatMath(
                     rawText = rawFinal,
                     standardGrade = gradeNum,
                     streamId = streamId
@@ -701,7 +716,7 @@ class AiTutorViewModel(application: Application) : AndroidViewModel(application)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                Log.e(TAG, "Cloud AI failed or timed out; routing to Offline Dual-Model Brain.", e)
+                Log.w(TAG, "Cloud AI restricted or App Check uninitialized; routing to Offline Dual-Model Brain: ${e.message}")
                 val offlineReply = OfflineCosmiumKnowledgeEngine.generateRagOfflineAnswer(
                     ragManager = ragManager,
                     query = cleanPrompt.ifBlank { "Explain core concepts for $scopeTitle" },

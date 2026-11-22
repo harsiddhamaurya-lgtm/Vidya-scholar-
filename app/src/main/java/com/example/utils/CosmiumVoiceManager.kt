@@ -9,7 +9,9 @@ import kotlinx.coroutines.flow.StateFlow
 import java.util.Locale
 
 class CosmiumVoiceManager(context: Context) {
-    private val TAG = "CosmiumVoiceManager"
+    private companion object {
+        const val TAG = "CosmiumVoiceManager"
+    }
     private var tts: TextToSpeech? = null
 
     @Volatile

@@ -6,6 +6,7 @@ import ai.onnxruntime.OrtSession
 import android.app.ActivityManager
 import android.content.Context
 import android.util.Log
+import com.example.utils.NativeCoreBridge
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -19,18 +20,17 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.json.JSONObject
 import java.io.File
+import java.io.RandomAccessFile
 import java.nio.LongBuffer
 import kotlin.math.sqrt
 
 /**
  * Dual-Model ONNX Lifecycle Manager for Cosmium:
- * 1. `all-MiniLM-L6-v2` Quantized Semantic Embedding Encoder (~23 MB) -> 384-dim query/chapter vectors.
- * 2. `Qwen 2.5 3B Instruct` 4-Bit INT4 Medium Language Model (MLM, ~1.9 GB) -> Step-by-step reasoning over retrieved passages.
+ * 1. `all-MiniLM-L6-v2` Quantized Semantic Embedding Encoder (~23 MB) -> 384-dim vectors when verified.
+ * 2. `Qwen 2.5 3B Instruct` 4-Bit INT4 Local Language Model -> Focused step-by-step synthesis over retrieved passages.
  *
- * Enforces:
- * - Zero startup model allocation (strict lazy loading).
- * - Hardware free-RAM guardrail via `ActivityManager.MemoryInfo`.
- * - 60-second idle auto-unload watchdog closing ONNX sessions to reclaim RAM cleanly alongside native TTS/GL.
+ * Guarantees unified vector space between indexing & querying via [activeEncoderSignature] and strict
+ * model integrity checks so corrupt/dummy artifacts are never loaded into ORT.
  */
 class OnnxDualModelManager(context: Context) {
 
@@ -38,6 +38,8 @@ class OnnxDualModelManager(context: Context) {
         private const val TAG = "OnnxDualModelManager"
         private const val VECTOR_DIM = EncryptedRagDatabase.VECTOR_DIM // 384
         const val IDLE_UNLOAD_TIMEOUT_MS = 60_000L
+        const val ENCODER_SIG_MINILM = "minilm_onnx_v1"
+        const val ENCODER_SIG_NATIVE = "native_cpp_v4"
     }
 
     private val appContext = context.applicationContext
@@ -65,12 +67,50 @@ class OnnxDualModelManager(context: Context) {
         return dir
     }
 
+    internal fun minValidModelBytes(spec: OfflineModelSpec): Long = when (spec) {
+        OfflineModelSpec.MINILM_ENCODER -> 1_000_000L
+        OfflineModelSpec.QWEN_2_5_3B_INT4 -> 50_000_000L
+    }
+
+    internal fun isCorruptStub(file: File): Boolean {
+        if (!file.exists() || file.length() < 16L) return true
+        return try {
+            val head = ByteArray(16)
+            RandomAccessFile(file, "r").use { raf ->
+                raf.readFully(head)
+            }
+            head.all { it == 0x58.toByte() }
+        } catch (_: Exception) {
+            true
+        }
+    }
+
+    internal fun isTokenizerValid(tokenizerFile: File): Boolean {
+        if (!tokenizerFile.exists() || tokenizerFile.length() < 512L) return false
+        return try {
+            val text = tokenizerFile.readText()
+            if (text.contains("cosmium_offline_fallback_tokenizer")) return false
+            val json = JSONObject(text)
+            val modelObj = json.optJSONObject("model") ?: return false
+            val vocabObj = modelObj.optJSONObject("vocab") ?: return false
+            vocabObj.length() >= 100
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     fun isModelDownloaded(spec: OfflineModelSpec): Boolean {
         val dir = modelDirectory(spec)
         val modelFile = File(dir, spec.primaryFileName)
         val tokenizerFile = File(dir, spec.tokenizerFileName)
-        return modelFile.exists() && modelFile.length() > 1024L && tokenizerFile.exists() && tokenizerFile.length() > 128L
+        return modelFile.exists() &&
+            modelFile.length() >= minValidModelBytes(spec) &&
+            !isCorruptStub(modelFile) &&
+            isTokenizerValid(tokenizerFile)
     }
+
+    fun activeEncoderSignature(): String =
+        if (isModelDownloaded(OfflineModelSpec.MINILM_ENCODER)) ENCODER_SIG_MINILM else ENCODER_SIG_NATIVE
 
     fun getMemoryStatsMb(): Pair<Long, Long> {
         return try {
@@ -91,13 +131,12 @@ class OnnxDualModelManager(context: Context) {
 
     fun canSafelyLoadQwen4Bit(): Boolean {
         val (freeMb, totalMb) = getMemoryStatsMb()
-        return freeMb >= OfflineModelSpec.QWEN_2_5_3B_INT4.minFreeRamMb || totalMb >= 6_000L && freeMb >= 1_800L
+        return freeMb >= OfflineModelSpec.QWEN_2_5_3B_INT4.minFreeRamMb ||
+            (totalMb >= 6_000L && freeMb >= 1_800L)
     }
 
     /**
-     * Generates a normalized 384-dim embedding for either a textbook passage or a student query.
-     * Uses downloaded `all-MiniLM-L6-v2` ONNX session when available, falling back seamlessly
-     * to a deterministic 384-dim concept-hashed semantic projection when weights are absent.
+     * Generates a normalized 384-dim query embedding in the exact active encoder vector space.
      */
     suspend fun encodeText(text: String): FloatArray {
         val clean = text.trim()
@@ -114,30 +153,75 @@ class OnnxDualModelManager(context: Context) {
     }
 
     /**
-     * Generates a step-by-step grounded answer using Qwen 2.5 3B INT4 ONNX when downloaded
-     * and memory permits; otherwise synthesizes a crisp, structured explanation directly from
-     * the top retrieved curriculum passages.
+     * Generates a normalized 384-dim document embedding with field weighting in the exact same
+     * vector space as [encodeText].
+     */
+    suspend fun encodeWeightedDocument(
+        title: String,
+        subject: String,
+        formulaTags: String,
+        body: String,
+        workedExample: String
+    ): FloatArray {
+        if (isModelDownloaded(OfflineModelSpec.MINILM_ENCODER)) {
+            val combined = "$title. $subject. $formulaTags. $body"
+            val onnxVec = runCatching { encodeWithMiniLmOnnx(combined) }.getOrNull()
+            if (onnxVec != null && onnxVec.size == VECTOR_DIM) {
+                scheduleIdleUnload()
+                return onnxVec
+            }
+        }
+        return NativeCoreBridge.encodeWeightedDocumentVector(
+            topicTitle = title,
+            subjectName = subject,
+            formulaTags = formulaTags,
+            contentText = "$body $workedExample".trim(),
+            dim = VECTOR_DIM
+        )
+    }
+
+    /**
+     * Generates an on-topic, interleaved textbook answer using the local 4-bit model when verified
+     * and memory permits, or synthesizes from the verified NCERT lesson / C++ composer.
      */
     suspend fun synthesizeGroundedAnswer(
         query: String,
         retrieved: List<RetrievedChunk>,
+        standardId: String,
+        streamId: String,
         standardTitle: String
     ): Pair<String, BrainMode> {
         val qwenReady = isModelDownloaded(OfflineModelSpec.QWEN_2_5_3B_INT4)
         if (qwenReady && !canSafelyLoadQwen4Bit()) {
             _lifecycleState.value = ModelLifecycleState.LOW_RAM_FALLBACK
-            return synthesizeStructuredRagFallback(query, retrieved, standardTitle, lowRamNotice = true) to BrainMode.OFFLINE_HYBRID_RAG
+            return synthesizeStructuredRagFallback(
+                query = query,
+                retrieved = retrieved,
+                standardId = standardId,
+                streamId = streamId,
+                standardTitle = standardTitle,
+                lowRamNotice = true
+            ) to BrainMode.OFFLINE_HYBRID_RAG
         }
 
-        if (qwenReady) {
-            val generated = runCatching { runQwen4BitInference(query, retrieved, standardTitle) }.getOrNull()
+        if (qwenReady && retrieved.isNotEmpty()) {
+            val generated = runCatching {
+                runQwen4BitInference(query, retrieved, standardId, streamId, standardTitle)
+            }.getOrNull()
             if (!generated.isNullOrBlank()) {
                 scheduleIdleUnload()
                 return generated to BrainMode.OFFLINE_QWEN_4BIT_RAG
             }
         }
 
-        return synthesizeStructuredRagFallback(query, retrieved, standardTitle, lowRamNotice = false) to BrainMode.OFFLINE_HYBRID_RAG
+        return synthesizeStructuredRagFallback(
+            query = query,
+            retrieved = retrieved,
+            standardId = standardId,
+            streamId = streamId,
+            standardTitle = standardTitle,
+            lowRamNotice = false
+        ) to BrainMode.OFFLINE_HYBRID_RAG
     }
 
     private suspend fun encodeWithMiniLmOnnx(text: String): FloatArray? = sessionMutex.withLock {
@@ -152,8 +236,9 @@ class OnnxDualModelManager(context: Context) {
         }
         val vocab = miniLmVocab ?: loadTokenizerVocab(File(dir, OfflineModelSpec.MINILM_ENCODER.tokenizerFileName))
             .also { miniLmVocab = it }
+        if (vocab.isEmpty()) return@withLock null
 
-        val tokenIds = tokenizeWordPiece(text, vocab, maxLen = 96)
+        val tokenIds = tokenizeWordPiece(text, vocab, maxLen = 128)
         val seqLen = tokenIds.size.toLong()
         val attentionMask = LongArray(tokenIds.size) { 1L }
         val tokenTypeIds = LongArray(tokenIds.size) { 0L }
@@ -184,6 +269,8 @@ class OnnxDualModelManager(context: Context) {
     private suspend fun runQwen4BitInference(
         query: String,
         retrieved: List<RetrievedChunk>,
+        standardId: String,
+        streamId: String,
         standardTitle: String
     ): String? = sessionMutex.withLock {
         _lifecycleState.value = ModelLifecycleState.LOADING
@@ -206,29 +293,42 @@ class OnnxDualModelManager(context: Context) {
 
         val vocab = qwenVocab ?: return@withLock null
         val revVocab = qwenReverseVocab ?: return@withLock null
-        val contextSummary = retrieved.take(3).joinToString("\n") { hit ->
-            "[${hit.chunk.subjectName} Ch.${hit.chunk.chapterNumber}: ${hit.chunk.topicTitle}] " +
-                "${hit.chunk.contentText} | Formulas: ${hit.chunk.formulaTags} | Example: ${hit.chunk.workedExample}"
+        if (vocab.isEmpty()) return@withLock null
+
+        val primaryHit = retrieved.firstOrNull() ?: return@withLock null
+        val gradeNum = when {
+            standardId.contains("9") -> 9
+            standardId.contains("10") -> 10
+            standardId.contains("12") -> 12
+            else -> 11
         }
+        val sysDirective = NativeCoreBridge.calibrateCosmosPrompt(
+            userQuery = query,
+            standardGrade = gradeNum,
+            streamId = streamId,
+            scopeTitle = standardTitle
+        )
+        val curatedContext = SyllabusPackCatalog.getStructuredLesson(primaryHit.chunk.chunkId)
+            ?: "${primaryHit.chunk.contentText}\nFormulas: ${primaryHit.chunk.formulaTags}\nExample: ${primaryHit.chunk.workedExample}"
+
         val prompt = buildString {
             append("<|im_start|>system\n")
-            append("You are Cosmium, an encouraging study tutor for $standardTitle. ")
-            append("Answer strictly using these verified syllabus passages:\n")
-            append(contextSummary)
+            append(sysDirective)
+            append("\nFocus EXCLUSIVELY on this verified syllabus unit ([${primaryHit.chunk.subjectName} Ch.${primaryHit.chunk.chapterNumber}: ${primaryHit.chunk.topicTitle}]):\n")
+            append(curatedContext.take(900))
             append("\n<|im_end|>\n<|im_start|>user\n")
             append(query)
             append("\n<|im_end|>\n<|im_start|>assistant\n")
         }
 
-        // Autoregressive greedy decoding loop (supports standard causal LM ONNX exports expecting input_ids & attention_mask)
         val inputNames = session.inputNames
         if ("input_ids" !in inputNames) return@withLock null
 
-        val promptIds = tokenizeWordPiece(prompt, vocab, maxLen = 384).toMutableList()
+        val promptIds = tokenizeWordPiece(prompt, vocab, maxLen = 512).toMutableList()
         val generatedTokens = mutableListOf<Int>()
         val eosId = vocab["<|im_end|>"] ?: vocab["<|endoftext|>"] ?: 151645
 
-        val maxNewTokens = 96
+        val maxNewTokens = 256
         for (step in 0 until maxNewTokens) {
             val seqArr = promptIds.toLongArray()
             val maskArr = LongArray(seqArr.size) { 1L }
@@ -245,63 +345,65 @@ class OnnxDualModelManager(context: Context) {
                 generatedTokens += nextId
                 promptIds += nextId.toLong()
             } catch (e: Exception) {
-                Log.w(TAG, "Qwen ONNX step aborted at step $step: ${e.message}")
+                Log.w(TAG, "Local LM inference step aborted at $step: ${e.message}")
                 break
             } finally {
                 inputs.values.forEach { runCatching { it.close() } }
             }
         }
 
-        if (generatedTokens.isEmpty()) return@withLock null
+        if (generatedTokens.size < 12) return@withLock null
         val decoded = generatedTokens.joinToString("") { id ->
             revVocab[id]?.replace("Ġ", " ")?.replace("Ċ", "\n")?.replace("##", "") ?: ""
         }.trim()
 
-        return@withLock decoded.takeIf { it.length >= 24 }
+        // Guard against garbled or repetitive outputs
+        return@withLock decoded.takeIf { it.length >= 60 && it.any(Char::isLetter) }
     }
 
     private fun synthesizeStructuredRagFallback(
         query: String,
         retrieved: List<RetrievedChunk>,
+        standardId: String,
+        streamId: String,
         standardTitle: String,
         lowRamNotice: Boolean
     ): String {
         if (retrieved.isEmpty()) {
+            val sampleTopics = SyllabusPackCatalog.getChunksForScope(standardId, streamId)
+                .take(5)
+                .joinToString("\n") { "- **${it.subjectName} (Ch. ${it.chapterNumber}):** ${it.topicTitle}" }
             return buildString {
-                append("Cosmium Study Guide ($standardTitle)\n\n")
-                append("I couldn't find an exact chapter match in your study guide for \"$query\".\n\n")
-                append("Try including key chapter terms or formulas such as Newton, Derivative, Kirchhoff, Mole, Genetics, or Accounting Equation.")
+                append("### $standardTitle • Syllabus Study Guide\n\n")
+                append("I couldn't find a direct match inside your **$standardTitle** syllabus pack for **\"$query\"**.\n\n")
+                append("To keep every answer accurate and free of cross-stream confusion, here are core chapters currently loaded for your level:\n\n")
+                append(sampleTopics)
+                append("\n\nAsk any specific concept, theorem, historical date, accounting rule, or numerical problem from your active syllabus above.")
             }
         }
 
         val primary = retrieved.first()
         val chunk = primary.chunk
+        val curatedLesson = SyllabusPackCatalog.getStructuredLesson(chunk.chunkId)
+        if (curatedLesson != null) {
+            return buildString {
+                append("### ${chunk.subjectName} • Ch. ${chunk.chapterNumber}: ${chunk.topicTitle}\n\n")
+                if (lowRamNotice) {
+                    append("*Prepared in fast offline syllabus mode.*\n\n")
+                }
+                append(curatedLesson.trim())
+            }
+        }
 
-        return buildString {
-            append("[${chunk.subjectName} • Ch. ${chunk.chapterNumber}: ${chunk.topicTitle}]\n\n")
-            append("1. Core Concept:\n")
-            append(chunk.contentText)
-            append("\n\n")
-            if (chunk.formulaTags.isNotBlank()) {
-                append("2. Key Formulas & Rules:\n\n")
-                val tags = chunk.formulaTags.split(", ").filter { it.isNotBlank() }
-                for (tag in tags) {
-                    append("$$ $tag $$\n")
-                }
-                append("\n")
-            }
-            if (chunk.workedExample.isNotBlank()) {
-                append("3. Worked Example:\n")
-                append(chunk.workedExample)
-                append("\n\n")
-            }
-            if (retrieved.size > 1) {
-                val related = retrieved.drop(1).joinToString(" • ") {
-                    "${it.chunk.subjectName}: ${it.chunk.topicTitle}"
-                }
-                append("Related Textbook Sections: $related")
-            }
-        }.trim()
+        return NativeCoreBridge.composeFallbackTextbookResponse(
+            topicTitle = chunk.topicTitle,
+            subjectName = chunk.subjectName,
+            chapterNumber = chunk.chapterNumber,
+            contentText = chunk.contentText,
+            formulaTags = chunk.formulaTags,
+            workedExample = chunk.workedExample,
+            lowRamNotice = lowRamNotice
+        )
     }
 
     fun scheduleIdleUnload() {
@@ -324,10 +426,10 @@ class OnnxDualModelManager(context: Context) {
     }
 
     /**
-     * Deterministic 384-dim semantic + synonym-expanded feature-hashing projection routed through C++.
+     * Deterministic 384-dim semantic + cluster-expanded projection routed through C++.
      */
     fun encodeConceptProjection(text: String): FloatArray =
-        com.example.utils.NativeCoreBridge.encodeConceptVector(text, VECTOR_DIM)
+        NativeCoreBridge.encodeConceptVector(text, VECTOR_DIM)
 
     private fun normalizeVector(vec: FloatArray): FloatArray {
         var sumSq = 0.0

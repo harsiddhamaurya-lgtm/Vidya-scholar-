@@ -144,6 +144,9 @@ interface RagChapterDao {
     @Query("DELETE FROM rag_chapters WHERE standard_id = :standardId AND stream_id = :streamId")
     suspend fun deleteScope(standardId: String, streamId: String)
 
+    @Query("DELETE FROM rag_chapters WHERE NOT (standard_id = :standardId AND stream_id = :streamId)")
+    suspend fun deleteOtherScopes(standardId: String, streamId: String)
+
     @Query(
         """
         SELECT c.* FROM rag_chapters AS c

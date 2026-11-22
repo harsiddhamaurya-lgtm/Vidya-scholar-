@@ -131,4 +131,78 @@ class OfflineRagTest {
         assertTrue(c10Math.isNotEmpty())
         assertTrue(c10Math.all { it.streamId == "general" })
     }
+
+    @Test
+    fun offlineRag_staysStrictlyOnTopicForWorkEnergyWithoutLeakingFrictionOrThermo() = runBlocking {
+        val app = ApplicationProvider.getApplicationContext<Application>()
+        RagRoomDatabase.resetInstanceForTesting()
+        app.deleteDatabase(RagRoomDatabase.ENCRYPTED_DB_NAME)
+
+        val manager = OfflineRAGManager(app)
+        val result = manager.answerOffline(
+            query = "explain work energy theorem",
+            standardId = "class_11",
+            streamId = "science_pcm"
+        )
+
+        assertTrue(result.retrievedChunks.isNotEmpty())
+        assertEquals("c11_pcm_phy_ch6_work_energy", result.retrievedChunks.first().chunk.chunkId)
+        assertTrue(result.answerText.contains("Work-Energy Theorem"))
+        assertTrue(result.answerText.contains("W_{\\text{net}} = \\Delta K"))
+        assertFalse("Must not mix static friction f_max into Work-Energy", result.answerText.contains("f_max"))
+        assertFalse("Must not mix Impulse into Work-Energy", result.answerText.contains("Impulse"))
+        assertFalse("Must not dump Thermodynamics into Work-Energy", result.answerText.contains("First Law of Thermodynamics"))
+
+        RagRoomDatabase.resetInstanceForTesting()
+    }
+
+    @Test
+    fun offlineRag_handlesAllStandardsStreamsAccuratelyAndEvictsOldScopesOnSwitch() = runBlocking {
+        val app = ApplicationProvider.getApplicationContext<Application>()
+        RagRoomDatabase.resetInstanceForTesting()
+        app.deleteDatabase(RagRoomDatabase.ENCRYPTED_DB_NAME)
+
+        val manager = OfflineRAGManager(app)
+
+        // 1. Switch to Class 9 -> retrieves French Revolution & Heron's Formula accurately
+        manager.switchActiveScope("class_9", "general")
+        val c9French = manager.answerOffline("When was the Bastille stormed in the French Revolution?", "class_9", "general")
+        assertEquals("c9_gen_sst_ch1_french", c9French.retrievedChunks.first().chunk.chunkId)
+        assertTrue(c9French.answerText.contains("14 July 1789"))
+
+        val c9Heron = manager.answerOffline("Calculate triangle area using Heron formula semiperimeter", "class_9", "general")
+        assertEquals("c9_gen_math_ch10_heron", c9Heron.retrievedChunks.first().chunk.chunkId)
+        assertTrue(c9Heron.answerText.contains("\\sqrt{s(s - a)(s - b)(s - c)}"))
+
+        // 2. Switch to Class 10 -> evicts Class 9 completely from Room & MMap disk index
+        manager.switchActiveScope("class_10", "general")
+        assertEquals(0, manager.roomDb.ragChapterDao().getCountForScope("class_9", "general"))
+        assertEquals(0L, manager.keywordIndex.getIndexSizeBytes("class_9", "general"))
+
+        val c10Real = manager.answerOffline("Fundamental Theorem of Arithmetic HCF LCM", "class_10", "general")
+        assertEquals("c10_gen_math_ch1_real", c10Real.retrievedChunks.first().chunk.chunkId)
+        assertTrue(c10Real.answerText.contains("\\text{HCF}(a, b)"))
+
+        // 3. Switch to Class 12 Commerce -> evicts Class 10, answers ratios accurately, rejects off-topic bio
+        manager.switchActiveScope("class_12", "commerce")
+        assertEquals(0, manager.roomDb.ragChapterDao().getCountForScope("class_10", "general"))
+        assertEquals(0L, manager.keywordIndex.getIndexSizeBytes("class_10", "general"))
+
+        val c12Goodwill = manager.answerOffline("Calculate partnership goodwill using Super Profit method", "class_12", "commerce")
+        assertEquals("c12_com_acc_ch3_goodwill", c12Goodwill.retrievedChunks.first().chunk.chunkId)
+        assertTrue(c12Goodwill.answerText.contains("Super Profit"))
+
+        val offTopic = manager.answerOffline("Explain chocolate cake baking recipe ingredients", "class_12", "commerce")
+        assertTrue("Off-topic query should return empty retrieval rather than hallucinating", offTopic.retrievedChunks.isEmpty())
+
+        // 4. Switch to Class 12 Arts -> evicts Commerce, verifies historical constitution dates
+        manager.switchActiveScope("class_12", "arts")
+        assertEquals(0, manager.roomDb.ragChapterDao().getCountForScope("class_12", "commerce"))
+
+        val c12Hist = manager.answerOffline("When was the Indian Constitution adopted and Champaran satyagraha?", "class_12", "arts")
+        assertEquals("c12_art_hist_ch1_mod", c12Hist.retrievedChunks.first().chunk.chunkId)
+        assertTrue(c12Hist.answerText.contains("26 November 1949"))
+
+        RagRoomDatabase.resetInstanceForTesting()
+    }
 }

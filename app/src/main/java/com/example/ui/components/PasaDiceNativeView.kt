@@ -51,7 +51,7 @@ class PasaDiceGLSurfaceView(context: Context) : GLSurfaceView(context) {
     @Volatile private var isReleased = false
 
     init {
-        CosmiumNativeBridge.ensureLoaded()
+        com.example.utils.NativeCoreBridge.ensureLoaded()
         setEGLContextClientVersion(3)
         setEGLConfigChooser(SafeTranslucentEglConfigChooser())
         holder.setFormat(PixelFormat.TRANSLUCENT)
@@ -146,7 +146,7 @@ fun PasaDiceNativeView(
 ) {
     if (!isActive) return
 
-    val nativeAvailable = remember { CosmiumNativeBridge.ensureLoaded() }
+    val nativeAvailable = remember { com.example.utils.NativeCoreBridge.ensureLoaded() }
     if (!nativeAvailable) {
         Box(
             modifier = modifier

@@ -84,57 +84,18 @@ object GameMusicPlayer {
         try {
             audioTrack.play()
 
-            // Select musical scale, tempo, and drone frequencies per game
-            val pattern: List<Double>
-            val droneFreq: Double
-            val noteDurationSec: Double
-            val isJoyful: Boolean
-
-            when (gameType) {
-                GameType.LUDO -> {
-                    // Joyful C Major Pentatonic bouncy melody (C5, E5, G5, A5, G5, E5, D5, C5, F5, A5, C6, G5)
-                    pattern = listOf(523.25, 659.25, 783.99, 880.00, 783.99, 659.25, 587.33, 523.25, 698.46, 880.00, 1046.50, 783.99)
-                    droneFreq = 130.81 // Warm C3 bass pulse
-                    noteDurationSec = 0.34
-                    isJoyful = true
-                }
-                GameType.CHATURANGA -> {
-                    // Serious & Ancient Raga Bhairav / Regal Drone (Sa, komal Re, Ga, Ma, Pa, komal Dha, Sa)
-                    pattern = listOf(261.63, 277.18, 329.63, 349.23, 392.00, 415.30, 392.00, 349.23, 329.63, 277.18, 261.63, 196.00)
-                    droneFreq = 130.81 // Deep Sa drone (C3 + G3 fifth harmonic)
-                    noteDurationSec = 0.68
-                    isJoyful = false
-                }
-                GameType.SHATRANJ -> {
-                    // Serious Strategic D Minor / Dorian Contemplative Chords (D4, F4, A4, C5, B4, A4, G4, E4)
-                    pattern = listOf(293.66, 349.23, 440.00, 523.25, 493.88, 440.00, 392.00, 329.63)
-                    droneFreq = 146.83 // Deep D3 strategic drone
-                    noteDurationSec = 0.72
-                    isJoyful = false
-                }
-            }
-
-            val samplesPerNote = (sampleRate * noteDurationSec).toInt()
-            val pcmBuffer = ShortArray(samplesPerNote)
             var noteIndex = 0
             var globalSample = 0L
 
             while (currentCoroutineContext().isActive && !isMuted) {
-                val melodyFreq = pattern[noteIndex % pattern.size]
-                val harmonicFreq = if (isJoyful) melodyFreq * 2.0 else droneFreq * 1.5
-
-                NativeCoreBridge.synthesizeMusicNote(
-                    outBuffer = pcmBuffer,
+                val pcmBuffer = NativeCoreBridge.synthesizeGameMusicStep(
+                    gameTypeOrdinal = gameType.ordinal,
+                    noteIndex = noteIndex,
                     sampleRate = sampleRate,
-                    melodyFreq = melodyFreq,
-                    harmonicFreq = harmonicFreq,
-                    droneFreq = droneFreq,
-                    isJoyful = isJoyful,
                     globalSampleStart = globalSample
                 )
-
                 audioTrack.write(pcmBuffer, 0, pcmBuffer.size)
-                globalSample += samplesPerNote
+                globalSample += pcmBuffer.size
                 noteIndex++
             }
         } catch (_: CancellationException) {

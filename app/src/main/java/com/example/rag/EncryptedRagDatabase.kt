@@ -3,17 +3,12 @@ package com.example.rag
 import android.content.ContentValues
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
-import android.os.Build
-import android.util.Base64
-import android.util.Log
 import androidx.sqlite.db.SupportSQLiteDatabase
 import androidx.sqlite.db.SupportSQLiteOpenHelper
 import androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory
-import com.example.security.SecurePrefsFactory
-import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
+import com.example.security.SqlCipherFactoryProvider
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
-import java.security.SecureRandom
 
 /**
  * Encrypted SQLCipher flat vector & textbook chunk cache scoped by (standardId, streamId).
@@ -25,7 +20,6 @@ import java.security.SecureRandom
 class EncryptedRagDatabase(context: Context) {
 
     companion object {
-        private const val TAG = "EncryptedRagDatabase"
         const val DB_NAME = "cosmium_rag_vault_enc.db"
         private const val DB_VERSION = 1
         private const val KEY_PREFS = "cosmium_rag_sqlcipher_key_v1"
@@ -92,7 +86,11 @@ class EncryptedRagDatabase(context: Context) {
             .callback(callback)
             .build()
 
-        val cipherFactory = createSqlCipherFactoryOrNull()
+        val cipherFactory = SqlCipherFactoryProvider.createFactoryOrNull(
+            appContext = appContext,
+            prefsName = KEY_PREFS,
+            passphraseKey = KEY_PASSPHRASE
+        )
         return if (cipherFactory != null) {
             isSqlCipherActive = true
             cipherFactory.create(config)
@@ -100,38 +98,6 @@ class EncryptedRagDatabase(context: Context) {
             isSqlCipherActive = false
             FrameworkSQLiteOpenHelperFactory().create(config)
         }
-    }
-
-    private fun createSqlCipherFactoryOrNull(): SupportOpenHelperFactory? {
-        if (Build.FINGERPRINT.equals("robolectric", ignoreCase = true)) {
-            return null
-        }
-        return try {
-            System.loadLibrary("sqlcipher")
-            val passphrase = getOrCreatePassphrase()
-            SupportOpenHelperFactory(passphrase)
-        } catch (e: UnsatisfiedLinkError) {
-            Log.w(TAG, "libsqlcipher unavailable, using fallback SQLite in test runtime: ${e.message}")
-            null
-        } catch (e: Exception) {
-            Log.e(TAG, "SQLCipher setup failed: ${e.message}")
-            null
-        }
-    }
-
-    private fun getOrCreatePassphrase(): ByteArray {
-        val prefs = SecurePrefsFactory.getEncryptedPrefs(appContext, KEY_PREFS)
-        val existing = prefs.getString(KEY_PASSPHRASE, null)
-        if (!existing.isNullOrBlank()) {
-            val decoded = runCatching { Base64.decode(existing, Base64.NO_WRAP) }.getOrNull()
-            if (decoded != null && decoded.size >= 32) {
-                return decoded
-            }
-        }
-        val key = ByteArray(32)
-        SecureRandom().nextBytes(key)
-        prefs.edit().putString(KEY_PASSPHRASE, Base64.encodeToString(key, Base64.NO_WRAP)).commit()
-        return key
     }
 
     fun upsertChunks(items: List<VectorizedChunk>) {

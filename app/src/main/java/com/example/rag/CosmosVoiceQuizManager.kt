@@ -70,7 +70,9 @@ class CosmosVoiceQuizManager(
     private val voiceManager: CosmiumVoiceManager,
     private val scope: CoroutineScope
 ) {
-    private val TAG = "CosmosVoiceQuizManager"
+    private companion object {
+        const val TAG = "CosmosVoiceQuizManager"
+    }
     private val mainHandler = Handler(Looper.getMainLooper())
 
     private val _uiState = MutableStateFlow(VoiceQuizUiState())

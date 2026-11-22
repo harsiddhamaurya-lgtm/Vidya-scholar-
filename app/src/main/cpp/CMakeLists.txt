@@ -6,10 +6,12 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 add_library(cosmium_native SHARED
     cosmium_jni.cpp
+    cosmium_math.cpp
+    cosmium_rag.cpp
+    cosmium_games.cpp
+    cosmium_audio.cpp
     cosmium_renderer.cpp
     pasa_dice_renderer.cpp
-    native_engines.cpp
-    CosmiumTtsEngine.cpp
 )
 
 find_library(log-lib log)

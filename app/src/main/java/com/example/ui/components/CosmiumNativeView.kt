@@ -18,27 +18,7 @@ import javax.microedition.khronos.egl.EGLDisplay
 import javax.microedition.khronos.opengles.GL10
 
 object CosmiumNativeBridge {
-    @Volatile
-    private var isLibraryLoaded = false
-    @Volatile
-    private var loadAttempted = false
-
-    fun ensureLoaded(): Boolean {
-        if (!loadAttempted) {
-            synchronized(this) {
-                if (!loadAttempted) {
-                    loadAttempted = true
-                    isLibraryLoaded = try {
-                        System.loadLibrary("cosmium_native")
-                        true
-                    } catch (_: UnsatisfiedLinkError) {
-                        false
-                    }
-                }
-            }
-        }
-        return isLibraryLoaded
-    }
+    fun ensureLoaded(): Boolean = com.example.utils.NativeCoreBridge.ensureLoaded()
 
     @JvmStatic external fun nativeCreate(): Long
     @JvmStatic external fun nativeInit(handle: Long, width: Int, height: Int)

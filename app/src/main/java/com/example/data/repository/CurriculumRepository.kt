@@ -27,7 +27,6 @@ import kotlinx.coroutines.launch
 import org.json.JSONObject
 
 class CurriculumRepository(private val context: Context) {
-    private val TAG = "CurriculumRepository"
     private val prefs by lazy {
         SecurePrefsFactory.getEncryptedPrefs(context.applicationContext, PREFS_PLAYBACK_NAME)
     }
@@ -697,6 +696,7 @@ class CurriculumRepository(private val context: Context) {
     }
 
     companion object {
+        private const val TAG = "CurriculumRepository"
         private const val PREFS_PLAYBACK_NAME = "vidya_curriculum_playback_v1"
     }
 }

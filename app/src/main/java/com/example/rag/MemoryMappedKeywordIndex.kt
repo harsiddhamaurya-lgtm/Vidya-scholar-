@@ -31,30 +31,8 @@ class MemoryMappedKeywordIndex(private val indexDir: File) {
         private const val BM25_K1 = 1.5f
         private const val BM25_B = 0.75f
 
-        private val STOP_WORDS = setOf(
-            "the", "is", "are", "was", "were", "a", "an", "and", "or", "of", "to", "in",
-            "for", "on", "with", "by", "from", "at", "as", "that", "this", "what", "how",
-            "why", "when", "which", "who", "please", "explain", "solve", "tell", "me", "my",
-            "can", "you", "it", "be", "into", "using", "about"
-        )
-
-        fun tokenize(text: String): List<String> {
-            if (text.isBlank()) return emptyList()
-            val normalized = text.lowercase()
-                .replace("f=ma", " f_eq_ma force mass acceleration newton ")
-                .replace("v=ir", " v_eq_ir ohm voltage current resistance ")
-                .replace("e=mc^2", " e_eq_mc2 energy relativity ")
-                .replace("d/dx", " d_dx derivative differentiation calculus ")
-                .replace("pv=nrt", " pv_eq_nrt ideal gas constant ")
-                .replace("a=l+c", " accounting equation assets liabilities capital ")
-
-            val rawTokens = Regex("[a-z0-9_]+(?:[+^=-][a-z0-9_]+)?").findAll(normalized)
-                .map { it.value.trim() }
-                .filter { it.length >= 2 && it !in STOP_WORDS }
-                .toList()
-
-            return rawTokens
-        }
+        fun tokenize(text: String): List<String> =
+            com.example.utils.NativeCoreBridge.tokenizeRagText(text)
     }
 
     fun indexFileForScope(standardId: String, streamId: String): File {
@@ -219,5 +197,19 @@ class MemoryMappedKeywordIndex(private val indexDir: File) {
     fun deleteScope(standardId: String, streamId: String) {
         val file = indexFileForScope(standardId, streamId)
         if (file.exists()) file.delete()
+    }
+
+    fun pruneOtherScopes(activeStandardId: String, activeStreamId: String) {
+        if (!indexDir.exists()) return
+        val keepName = "rag_kw_${activeStandardId}_${activeStreamId}.idx.bin"
+        indexDir.listFiles()?.forEach { file ->
+            if (file.isFile &&
+                file.name.startsWith("rag_kw_") &&
+                file.name.endsWith(".idx.bin") &&
+                file.name != keepName
+            ) {
+                runCatching { file.delete() }
+            }
+        }
     }
 }

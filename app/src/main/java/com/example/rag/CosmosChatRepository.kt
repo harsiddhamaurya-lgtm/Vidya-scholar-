@@ -37,7 +37,6 @@ class CosmosChatRepository(
     },
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO
 ) {
-    private val TAG = "CosmosChatRepository"
     private val chatDao: CosmosChatDao = roomDb.cosmosChatDao()
 
     private val _activeSessionId = MutableStateFlow<String>(DEFAULT_SESSION_ID)
@@ -47,6 +46,7 @@ class CosmosChatRepository(
     val isSyncing: StateFlow<Boolean> = _isSyncing.asStateFlow()
 
     companion object {
+        private const val TAG = "CosmosChatRepository"
         const val DEFAULT_SESSION_ID = "cosmos_active_session"
         const val GUEST_USER_ID = "guest_scholar"
     }

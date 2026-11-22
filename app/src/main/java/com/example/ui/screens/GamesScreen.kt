@@ -53,8 +53,14 @@ import androidx.compose.ui.graphics.Path
 @Composable
 fun GamesScreen(
     userProfile: UserProfile? = null,
-    gamesViewModel: GamesViewModel = viewModel()
+    gamesViewModel: GamesViewModel = viewModel(),
+    isGamesActive: Boolean = true
 ) {
+    LaunchedEffect(isGamesActive) {
+        if (!isGamesActive) {
+            gamesViewModel.closeGameHub()
+        }
+    }
     val activeGame by gamesViewModel.activeGame.collectAsStateWithLifecycle()
     val selectedGameForSetup by gamesViewModel.selectedGameForSetup.collectAsStateWithLifecycle()
     val rulebookGameType by gamesViewModel.rulebookGameType.collectAsStateWithLifecycle()

@@ -463,10 +463,10 @@ private fun SanctuaryNavHost(
         navController = navController,
         startDestination = "main_pager",
         modifier = Modifier.fillMaxSize(),
-        enterTransition = { com.example.utils.IndoMotion.mandalaEnterTransition() },
-        exitTransition = { com.example.utils.IndoMotion.mandalaExitTransition() },
-        popEnterTransition = { com.example.utils.IndoMotion.mandalaEnterTransition() },
-        popExitTransition = { com.example.utils.IndoMotion.mandalaExitTransition() }
+        enterTransition = { EnterTransition.None },
+        exitTransition = { ExitTransition.None },
+        popEnterTransition = { EnterTransition.None },
+        popExitTransition = { ExitTransition.None }
     ) {
         composable("main_pager") {
             HorizontalPager(
@@ -475,14 +475,13 @@ private fun SanctuaryNavHost(
                 beyondViewportPageCount = 0
             ) { virtualPage ->
                 val page = virtualPage.toTabIndex()
-                val targetTab = pagerState.targetPage.toTabIndex()
-                if (page == currentTab || page == targetTab || loadedTabs.contains(page)) {
+                if (page == currentTab) {
                     when (page) {
                         0 -> HomeScreen(
                             userProfile = userProfile,
                             onNavigateToCourse = { courseId -> navController.navigate("lesson_$courseId") },
-                            onNavigateToAiTutor = { navigatePagerToTab(2, true) },
-                            onNavigateToCommunity = { navigatePagerToTab(3, true) },
+                            onNavigateToAiTutor = { navigatePagerToTab(2, false) },
+                            onNavigateToCommunity = { navigatePagerToTab(3, false) },
                             onNavigateToProfile = { navController.navigate("profile") },
                             vidyaViewModel = remember { getVidyaVaultViewModel() },
                             onResumeQuestLevel = { realmId, level ->
@@ -490,7 +489,7 @@ private fun SanctuaryNavHost(
                             },
                             onLaunchDailyChallenge = { prompt ->
                                 getAiTutorViewModel().sendMessage(prompt)
-                                navigatePagerToTab(2, true)
+                                navigatePagerToTab(2, false)
                             }
                         )
                         1 -> CoursesScreen(
@@ -513,11 +512,12 @@ private fun SanctuaryNavHost(
                             onNavigateToChat = { chatId -> navController.navigate("chat_$chatId") }
                         )
                         4 -> GamesScreen(
-                            userProfile = userProfile
+                            userProfile = userProfile,
+                            isGamesActive = (currentTab == 4)
                         )
                     }
                 } else {
-                    LazyTabSkeleton(page = page)
+                    Box(modifier = Modifier.fillMaxSize()) {}
                 }
             }
         }

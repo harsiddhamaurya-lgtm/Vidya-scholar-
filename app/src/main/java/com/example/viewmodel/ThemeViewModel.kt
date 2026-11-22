@@ -1,7 +1,6 @@
 package com.example.viewmodel
 
 import android.app.Application
-import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import com.example.security.LocalProfileStore
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -28,9 +27,5 @@ class ThemeViewModel(application: Application) : AndroidViewModel(application) {
     fun setThemeMode(mode: AppThemeMode) {
         _themeMode.value = mode
         profileStore.saveThemeMode(mode.name)
-    }
-
-    companion object {
-        fun detectSmartUiMode(context: Context): AppThemeMode = AppThemeMode.LIGHT
     }
 }

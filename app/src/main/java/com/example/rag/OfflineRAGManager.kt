@@ -1,6 +1,7 @@
 package com.example.rag
 
 import android.content.Context
+import com.example.utils.NativeCoreBridge
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -10,45 +11,43 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 /**
- * Coordinates Cosmium's Offline Retrieval-Augmented Generation (RAG) pipeline:
+ * Coordinates Cosmium's Scoped Offline Retrieval-Augmented Generation (RAG) pipeline:
  *
- * 1. **all-MiniLM-L6-v2 ONNX Embedding Encoder**: Generates normalized 384-dim semantic vectors
- *    for downloaded textbook chapters and incoming student queries.
- * 2. **Encrypted Room Database + FTS4 Full-Text Search**: Stores chapter payloads and `float32`
- *    vector blobs inside a SQLCipher-encrypted Room DB (`RagRoomDatabase`) paired with a
- *    synchronized SQLite FTS4 virtual table (`rag_chapters_fts`) for fast keyword indexing.
- * 3. **Memory-Mapped Inverted Keyword Index (`*.idx.bin`)**: Augments Room FTS4 with BM25 scoring
- *    via `MappedByteBuffer`.
- * 4. **Medium Language Model (MLM) 4-Bit Brain (`Qwen 2.5 3B INT4`)**: Synthesizes step-by-step
- *    grounded answers over top retrieved textbook chapters (with low-RAM / pre-download fallback).
+ * 1. **Strict Standard/Stream Isolation & Lazy Eviction**: Only the student's active
+ *    `(standardId, streamId)` syllabus pack is persisted in Encrypted Room (`RagRoomDatabase`)
+ *    and Memory-Mapped BM25 (`MemoryMappedKeywordIndex`). Other standards/streams are pruned
+ *    automatically on onboarding or scope switch to save storage and prevent cross-stream noise.
+ * 2. **Unified Vector Space**: Encodes both chapters and queries via the active encoder
+ *    (`minilm_onnx_v1` or `native_cpp_v4`) and auto-reindexes whenever catalog version or active
+ *    encoder changes.
+ * 3. **Cluster + Logistic Specificity Gating**: Fuses Dense cosine similarity, Room FTS4, MMap
+ *    BM25, and C++ logistic specificity calibration with strict minimum-confidence and single-subject
+ *    purity filtering so unrelated formulas never leak into responses.
  */
 class OfflineRAGManager(context: Context) {
 
     companion object {
         private const val VECTOR_DIM = EncryptedRagDatabase.VECTOR_DIM // 384
-        private const val DENSE_WEIGHT = 0.55f
-        private const val FTS_WEIGHT = 0.25f
-        private const val BM25_MMAP_WEIGHT = 0.20f
-        private const val MIN_RELEVANCE_THRESHOLD = 0.08f
+        private const val DENSE_WEIGHT = 0.35f
+        private const val FTS_WEIGHT = 0.15f
+        private const val BM25_MMAP_WEIGHT = 0.15f
+        private const val SPECIFICITY_WEIGHT = 0.35f
+        private const val MIN_PRIMARY_SCORE = 0.28f
+        private const val META_PREFS = "cosmium_rag_catalog_meta"
 
         fun cosineSimilarity(a: FloatArray, b: FloatArray): Float =
-            com.example.utils.NativeCoreBridge.cosineSimilarity(a, b)
+            NativeCoreBridge.cosineSimilarity(a, b)
 
         /**
          * Converts arbitrary student queries (including formulas or punctuation) into a safe
          * SQLite FTS4 `MATCH` prefix-OR query string (e.g. `kirchhoff* OR wheatstone*`).
          */
-        fun buildSafeFtsMatchQuery(rawQuery: String): String {
-            val tokens = MemoryMappedKeywordIndex.tokenize(rawQuery)
-                .map { it.replace(Regex("[^a-z0-9_]"), "") }
-                .filter { it.length >= 2 }
-                .distinct()
-                .take(8)
-            return tokens.joinToString(" OR ") { "${it}*" }
-        }
+        fun buildSafeFtsMatchQuery(rawQuery: String): String =
+            NativeCoreBridge.buildSafeFtsMatchQuery(rawQuery)
     }
 
     private val appContext = context.applicationContext
+    private val catalogMetaPrefs = appContext.getSharedPreferences(META_PREFS, Context.MODE_PRIVATE)
     val roomDb: RagRoomDatabase = RagRoomDatabase.getInstance(appContext)
     private val chapterDao: RagChapterDao = roomDb.ragChapterDao()
     val keywordIndex = MemoryMappedKeywordIndex(File(appContext.filesDir, "cosmium_rag"))
@@ -60,10 +59,16 @@ class OfflineRAGManager(context: Context) {
             standardId = "class_11",
             streamId = "science_pcm",
             title = "Class 11 • Science (PCM)",
-            subtitle = "Physics, Chemistry, Advanced Mathematics & AI/Computing"
+            subtitle = "Physics, Chemistry, Mathematics & Computer Science"
         )
     )
     val packStatus: StateFlow<StandardPackStatus> = _packStatus.asStateFlow()
+
+    private fun scopeMetaKey(standardId: String, streamId: String): String =
+        "meta_${standardId}_${streamId}"
+
+    private fun currentExpectedSignature(): String =
+        "${SyllabusPackCatalog.CATALOG_VERSION}:${modelManager.activeEncoderSignature()}"
 
     fun observeChaptersForScope(standardId: String, streamId: String): Flow<List<RagChapterEntity>> {
         val effectiveStream = SyllabusPackCatalog.normalizeStreamForStandard(standardId, streamId)
@@ -93,14 +98,15 @@ class OfflineRAGManager(context: Context) {
         }
 
     /**
-     * Generates 384-dim `all-MiniLM-L6-v2` embeddings for the supplied textbook chapters,
-     * writes them into the encrypted Room database (automatically updating the Room FTS4 index),
-     * and builds the companion Memory-Mapped BM25 index file.
+     * Generates 384-dim weighted document embeddings in the active encoder vector space,
+     * writes them into Encrypted Room (+ FTS4), builds the companion MMap BM25 index, and
+     * optionally evicts all other standards/streams from device storage.
      */
     suspend fun indexDownloadedChapters(
         standardId: String,
         streamId: String,
-        chapters: List<TextbookChunk>
+        chapters: List<TextbookChunk>,
+        pruneOtherScopes: Boolean = true
     ): StandardPackStatus = withContext(Dispatchers.IO) {
         val effectiveStream = SyllabusPackCatalog.normalizeStreamForStandard(standardId, streamId)
         val (title, subtitle) = SyllabusPackCatalog.getPackMetadata(standardId, effectiveStream)
@@ -118,10 +124,19 @@ class OfflineRAGManager(context: Context) {
             sqlCipherActive = RagRoomDatabase.isSqlCipherActive
         )
 
+        if (pruneOtherScopes) {
+            pruneOtherScopesInternal(standardId, effectiveStream)
+        }
+
         val entities = ArrayList<RagChapterEntity>(chapters.size)
         chapters.forEachIndexed { idx, chunk ->
-            val embedInput = "${chunk.topicTitle}. ${chunk.subjectName}. ${chunk.formulaTags}. ${chunk.contentText}"
-            val vector = modelManager.encodeText(embedInput)
+            val vector = modelManager.encodeWeightedDocument(
+                title = chunk.topicTitle,
+                subject = chunk.subjectName,
+                formulaTags = chunk.formulaTags,
+                body = chunk.contentText,
+                workedExample = chunk.workedExample
+            )
             val normalizedVec = if (vector.size == VECTOR_DIM) vector else FloatArray(VECTOR_DIM)
             entities += RagChapterEntity(
                 chunkId = chunk.chunkId,
@@ -146,13 +161,55 @@ class OfflineRAGManager(context: Context) {
         _packStatus.value = _packStatus.value.copy(installProgress = 0.88f)
 
         keywordIndex.buildAndPersist(standardId, effectiveStream, chapters)
+        catalogMetaPrefs.edit()
+            .putString(scopeMetaKey(standardId, effectiveStream), currentExpectedSignature())
+            .apply()
+
         refreshPackStatus(standardId, effectiveStream)
     }
 
     suspend fun installOrReindexPack(standardId: String, streamId: String): StandardPackStatus {
         val effectiveStream = SyllabusPackCatalog.normalizeStreamForStandard(standardId, streamId)
         val chunks = SyllabusPackCatalog.getChunksForScope(standardId, effectiveStream)
-        return indexDownloadedChapters(standardId, effectiveStream, chunks)
+        return indexDownloadedChapters(standardId, effectiveStream, chunks, pruneOtherScopes = true)
+    }
+
+    /**
+     * Switches device storage exclusively to `(standardId, streamId)`: evicts all other standards
+     * and streams immediately and lazily installs the new scope if missing or stale.
+     */
+    suspend fun switchActiveScope(standardId: String, streamId: String): StandardPackStatus =
+        withContext(Dispatchers.IO) {
+            val effectiveStream = SyllabusPackCatalog.normalizeStreamForStandard(standardId, streamId)
+            pruneOtherScopesInternal(standardId, effectiveStream)
+            ensureActiveScopeReady(standardId, effectiveStream)
+            refreshPackStatus(standardId, effectiveStream)
+        }
+
+    suspend fun pruneOtherScopesExcept(standardId: String, streamId: String) =
+        withContext(Dispatchers.IO) {
+            val effectiveStream = SyllabusPackCatalog.normalizeStreamForStandard(standardId, streamId)
+            pruneOtherScopesInternal(standardId, effectiveStream)
+        }
+
+    private suspend fun pruneOtherScopesInternal(standardId: String, effectiveStream: String) {
+        chapterDao.deleteOtherScopes(standardId, effectiveStream)
+        keywordIndex.pruneOtherScopes(standardId, effectiveStream)
+        val keepKey = scopeMetaKey(standardId, effectiveStream)
+        val editor = catalogMetaPrefs.edit()
+        catalogMetaPrefs.all.keys
+            .filter { it.startsWith("meta_") && it != keepKey }
+            .forEach { editor.remove(it) }
+        editor.apply()
+    }
+
+    private suspend fun ensureActiveScopeReady(standardId: String, effectiveStream: String) {
+        val count = chapterDao.getCountForScope(standardId, effectiveStream)
+        val idxBytes = keywordIndex.getIndexSizeBytes(standardId, effectiveStream)
+        val savedSig = catalogMetaPrefs.getString(scopeMetaKey(standardId, effectiveStream), null)
+        if (count == 0 || idxBytes == 0L || savedSig != currentExpectedSignature()) {
+            installOrReindexPack(standardId, effectiveStream)
+        }
     }
 
     suspend fun clearPackForScope(standardId: String, streamId: String): StandardPackStatus =
@@ -160,21 +217,25 @@ class OfflineRAGManager(context: Context) {
             val effectiveStream = SyllabusPackCatalog.normalizeStreamForStandard(standardId, streamId)
             chapterDao.deleteScope(standardId, effectiveStream)
             keywordIndex.deleteScope(standardId, effectiveStream)
+            catalogMetaPrefs.edit().remove(scopeMetaKey(standardId, effectiveStream)).apply()
             refreshPackStatus(standardId, effectiveStream)
         }
 
     /**
-     * Hybrid retrieval fusing:
-     * 1. `all-MiniLM-L6-v2` 384-dim dense vector cosine similarity stored in Encrypted Room (`0.55`)
-     * 2. Room FTS4 (`rag_chapters_fts MATCH`) keyword hit ranking (`0.25`)
-     * 3. Memory-Mapped Inverted Keyword Index BM25 score (`0.20`)
-     * Strictly isolated to `(standardId, streamId)`.
+     * Hybrid retrieval strictly isolated to `(standardId, streamId)` fusing:
+     * 1. Active encoder dense cosine similarity (`0.35`)
+     * 2. Room FTS4 prefix match rank (`0.15`)
+     * 3. Memory-Mapped BM25 score (`0.15`)
+     * 4. C++ logistic-calibrated cluster & conflict specificity (`0.35`)
+     *
+     * Enforces minimum relevance and same-subject secondary gating so off-topic or cross-chapter
+     * equations never pollute answers.
      */
     suspend fun retrieveRelevantChapters(
         query: String,
         standardId: String,
         streamId: String,
-        topK: Int = 3
+        topK: Int = 2
     ): List<RetrievedChunk> = withContext(Dispatchers.IO) {
         val effectiveStream = SyllabusPackCatalog.normalizeStreamForStandard(standardId, streamId)
         val scopedChapters = chapterDao.getChaptersForScope(standardId, effectiveStream)
@@ -195,13 +256,14 @@ class OfflineRAGManager(context: Context) {
             emptyList()
         }
         val ftsRankByChunkId = ftsHits.mapIndexed { idx, entity ->
-            val rankScore = (1f - (idx.toFloat() / ftsHits.size.coerceAtLeast(1).toFloat()) * 0.5f).coerceIn(0.4f, 1f)
+            val rankScore = (1f - (idx.toFloat() / ftsHits.size.coerceAtLeast(1).toFloat()) * 0.5f)
+                .coerceIn(0.4f, 1f)
             entity.chunkId to rankScore
         }.toMap()
 
         val bm25Hits = keywordIndex.search(standardId, effectiveStream, query)
 
-        scopedChapters.map { entity ->
+        val scored = scopedChapters.map { entity ->
             val storedVec = EncryptedRagDatabase.decodeFloatArray(entity.embeddingBlob)
             val dense = cosineSimilarity(queryVec, storedVec)
             val ftsScore = ftsRankByChunkId[entity.chunkId] ?: 0f
@@ -209,7 +271,23 @@ class OfflineRAGManager(context: Context) {
             val bm25 = bm25Pair?.first ?: 0f
             val keywords = bm25Pair?.second ?: emptyList()
 
-            val fused = (DENSE_WEIGHT * dense) + (FTS_WEIGHT * ftsScore) + (BM25_MMAP_WEIGHT * bm25)
+            val specificity = NativeCoreBridge.computeTopicSpecificityScore(
+                query = query,
+                topicTitle = entity.topicTitle,
+                subjectName = entity.subjectName,
+                formulaTags = entity.formulaTags,
+                contentText = entity.contentText,
+                denseSim = dense,
+                ftsScore = ftsScore,
+                bm25Score = bm25
+            )
+            val fused = (
+                (DENSE_WEIGHT * dense) +
+                    (FTS_WEIGHT * ftsScore) +
+                    (BM25_MMAP_WEIGHT * bm25) +
+                    (SPECIFICITY_WEIGHT * specificity)
+                ).coerceIn(0f, 1f)
+
             RetrievedChunk(
                 chunk = entity.toTextbookChunk(),
                 denseScore = dense,
@@ -217,10 +295,26 @@ class OfflineRAGManager(context: Context) {
                 fusedScore = fused,
                 matchedKeywords = keywords
             )
+        }.sortedByDescending { it.fusedScore }
+
+        val top = scored.firstOrNull() ?: return@withContext emptyList()
+        val passesPrimaryGate = top.fusedScore >= MIN_PRIMARY_SCORE ||
+            (top.bm25Score >= 0.70f && top.denseScore >= 0.22f)
+        if (!passesPrimaryGate) return@withContext emptyList()
+
+        if (topK <= 1) return@withContext listOf(top)
+
+        val secondaryThreshold = maxOf(0.50f, top.fusedScore * 0.82f)
+        val filtered = mutableListOf(top)
+        for (candidate in scored.drop(1)) {
+            if (filtered.size >= topK) break
+            if (candidate.chunk.subjectId == top.chunk.subjectId &&
+                candidate.fusedScore >= secondaryThreshold
+            ) {
+                filtered += candidate
+            }
         }
-            .filter { it.fusedScore >= MIN_RELEVANCE_THRESHOLD || it.bm25Score > 0f }
-            .sortedByDescending { it.fusedScore }
-            .take(topK)
+        filtered
     }
 
     suspend fun answerOffline(
@@ -230,13 +324,17 @@ class OfflineRAGManager(context: Context) {
     ): RagAnswerResult = withContext(Dispatchers.IO) {
         val startMs = System.currentTimeMillis()
         val effectiveStream = SyllabusPackCatalog.normalizeStreamForStandard(standardId, streamId)
-        if (chapterDao.getCountForScope(standardId, effectiveStream) == 0) {
-            installOrReindexPack(standardId, effectiveStream)
-        }
+        ensureActiveScopeReady(standardId, effectiveStream)
 
-        val retrieved = retrieveRelevantChapters(query, standardId, effectiveStream, topK = 3)
+        val retrieved = retrieveRelevantChapters(query, standardId, effectiveStream, topK = 1)
         val (standardTitle, _) = SyllabusPackCatalog.getPackMetadata(standardId, effectiveStream)
-        val (answer, mode) = modelManager.synthesizeGroundedAnswer(query, retrieved, standardTitle)
+        val (answer, mode) = modelManager.synthesizeGroundedAnswer(
+            query = query,
+            retrieved = retrieved,
+            standardId = standardId,
+            streamId = effectiveStream,
+            standardTitle = standardTitle
+        )
         val elapsed = System.currentTimeMillis() - startMs
 
         RagAnswerResult(

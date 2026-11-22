@@ -1062,8 +1062,13 @@ private fun CosmosAiReplyCard(
             ) {
                 if (isStillRevealing || isStreaming) {
                     // Render smooth 60fps text during reveal/streaming to expand card cleanly without WebView flicker
+                    val previewText = remember(displayedText) {
+                        if (displayedText.isBlank()) "…"
+                        else com.example.ui.components.formatReadableMathFallback(displayedText)
+                            .ifBlank { displayedText }
+                    }
                     Text(
-                        text = if (displayedText.isEmpty()) "…" else displayedText,
+                        text = previewText,
                         style = MaterialTheme.typography.bodyMedium,
                         lineHeight = 22.sp,
                         color = MaterialTheme.colorScheme.onSurface
@@ -1097,6 +1102,7 @@ private fun CosmosAiReplyCard(
                             is CosmosSegment.Prose -> {
                                 com.example.ui.components.CosmosMathProseView(
                                     text = seg.content,
+                                    modifier = Modifier.fillMaxWidth(),
                                     textColor = MaterialTheme.colorScheme.onSurface
                                 )
                             }
@@ -1184,20 +1190,37 @@ private sealed class CosmosSegment {
 
 private fun parseCosmosSegments(raw: String): List<CosmosSegment> {
     val result = mutableListOf<CosmosSegment>()
-    val regex = Regex("```(?:[a-zA-Z0-9_+-]*\\n)?([\\s\\S]*?)```")
+    val regex = Regex("```([a-zA-Z0-9_+-]*)[ \\t]*\\r?\\n([\\s\\S]*?)```")
+
+    fun appendProse(chunk: String) {
+        val trimmed = chunk.trim()
+        if (trimmed.isEmpty()) return
+        val last = result.lastOrNull()
+        if (last is CosmosSegment.Prose) {
+            result[result.lastIndex] = CosmosSegment.Prose("${last.content}\n\n$trimmed")
+        } else {
+            result += CosmosSegment.Prose(trimmed)
+        }
+    }
+
     var cursor = 0
     for (match in regex.findAll(raw)) {
         if (match.range.first > cursor) {
-            val prose = raw.substring(cursor, match.range.first).trim()
-            if (prose.isNotEmpty()) result += CosmosSegment.Prose(prose)
+            appendProse(raw.substring(cursor, match.range.first))
         }
-        val code = match.groupValues[1].trim()
-        if (code.isNotEmpty()) result += CosmosSegment.CodeOrFormula(code)
+        val lang = match.groupValues[1].trim().lowercase()
+        val code = match.groupValues[2].trim()
+        if (code.isNotEmpty()) {
+            if (lang == "latex" || lang == "tex" || lang == "math") {
+                appendProse("\$\$\n$code\n\$\$")
+            } else {
+                result += CosmosSegment.CodeOrFormula(code)
+            }
+        }
         cursor = match.range.last + 1
     }
     if (cursor < raw.length) {
-        val tail = raw.substring(cursor).trim()
-        if (tail.isNotEmpty()) result += CosmosSegment.Prose(tail)
+        appendProse(raw.substring(cursor))
     }
     if (result.isEmpty()) result += CosmosSegment.Prose(raw)
     return result
